@@ -1,0 +1,19 @@
+{
+  "name": "tiacc-example",
+  "version": "1.0.0",
+  "description": "TiaCC Demo - Calculator with Test Impact Analysis",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --coverageReporters=json",
+    "demo": "node demo.js",
+    "demo:full": "node demo.js --full",
+    "demo:affected": "node demo.js --affected"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
