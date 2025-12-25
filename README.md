@@ -9,7 +9,7 @@
 - **灵活的录制模式**:
   - 精确模式 (Precise): 每个测试单独录制，1:1 精确映射
   - 批量模式 (Bucket): 测试分组录制，减少 IO 开销
-- **Lua 测试框架集成**: 通过 IPC 与测试框架无缝集成
+- **多语言测试框架集成**: Lua, Python, C#, TypeScript, Go 客户端
 - **Git 集成**: 自动检测变更文件并推荐测试
 
 ## 项目结构
@@ -22,7 +22,12 @@ TiaCC/
 ├── tools-node/               # Node.js/TypeScript CLI 工具
 │   ├── src/cli/mapper.ts     # 映射生成器
 │   └── src/cli/recommend.ts  # 变更推荐器
-├── lua/                      # Lua 测试框架集成
+├── clients/                  # 多语言客户端
+│   ├── tia_hooks.lua         # Lua
+│   ├── tia_hooks.py          # Python
+│   ├── TiaHooks.cs           # C#
+│   ├── tia_hooks.ts          # TypeScript
+│   └── tia_hooks.go          # Go
 └── tests/                    # 单元测试
 ```
 
