@@ -7,7 +7,8 @@
   "types": "dist/index.d.ts",
   "bin": {
     "tia-mapper": "dist/cli/mapper.js",
-    "tia-recommend": "dist/cli/recommend.js"
+    "tia-recommend": "dist/cli/recommend.js",
+    "tia-runner": "dist/test-runner.js"
   },
   "scripts": {
     "build": "tsc",
@@ -16,7 +17,8 @@
     "test:watch": "vitest",
     "lint": "eslint src --ext .ts",
     "mapper": "tsx src/cli/mapper.ts",
-    "recommend": "tsx src/cli/recommend.ts"
+    "recommend": "tsx src/cli/recommend.ts",
+    "runner": "tsx src/test-runner.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
