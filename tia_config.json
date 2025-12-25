@@ -1,0 +1,30 @@
+{
+    "recording_mode": "precise",
+    "bucket_size": 50,
+    "output_dir": "./coverage_data",
+
+    "cpp_service": {
+        "host": "127.0.0.1",
+        "port": 19840
+    },
+
+    "csharp_service": {
+        "host": "127.0.0.1",
+        "port": 19841
+    },
+
+    "llvm_tools": {
+        "profdata": "llvm-profdata",
+        "cov": "llvm-cov"
+    },
+
+    "source_extensions": [
+        ".cpp", ".cc", ".cxx", ".c",
+        ".h", ".hpp", ".hxx",
+        ".cs"
+    ],
+
+    "test_extensions": [
+        ".lua"
+    ]
+}

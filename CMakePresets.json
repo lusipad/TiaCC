@@ -1,0 +1,176 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "installDir": "${sourceDir}/install/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "windows-clang",
+            "displayName": "Windows Clang (Release)",
+            "description": "Windows build with Clang-cl for coverage support",
+            "inherits": "base",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang-cl",
+                "CMAKE_CXX_COMPILER": "clang-cl",
+                "CMAKE_BUILD_TYPE": "Release"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "windows-clang-debug",
+            "displayName": "Windows Clang (Debug)",
+            "description": "Windows debug build with Clang-cl",
+            "inherits": "windows-clang",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "windows-clang-coverage",
+            "displayName": "Windows Clang (Coverage)",
+            "description": "Windows build with coverage instrumentation",
+            "inherits": "windows-clang",
+            "cacheVariables": {
+                "TIA_ENABLE_COVERAGE": "ON",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "windows-msvc",
+            "displayName": "Windows MSVC (Release)",
+            "description": "Windows build with MSVC (no native coverage support)",
+            "inherits": "base",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "linux-clang",
+            "displayName": "Linux Clang (Release)",
+            "description": "Linux build with Clang",
+            "inherits": "base",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_BUILD_TYPE": "Release"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            }
+        },
+        {
+            "name": "linux-clang-coverage",
+            "displayName": "Linux Clang (Coverage)",
+            "description": "Linux build with coverage instrumentation",
+            "inherits": "linux-clang",
+            "cacheVariables": {
+                "TIA_ENABLE_COVERAGE": "ON",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "macos-clang",
+            "displayName": "macOS Clang (Release)",
+            "description": "macOS build with Apple Clang",
+            "inherits": "base",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            }
+        },
+        {
+            "name": "macos-clang-coverage",
+            "displayName": "macOS Clang (Coverage)",
+            "description": "macOS build with coverage instrumentation",
+            "inherits": "macos-clang",
+            "cacheVariables": {
+                "TIA_ENABLE_COVERAGE": "ON",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "windows-clang",
+            "configurePreset": "windows-clang"
+        },
+        {
+            "name": "windows-clang-debug",
+            "configurePreset": "windows-clang-debug"
+        },
+        {
+            "name": "windows-clang-coverage",
+            "configurePreset": "windows-clang-coverage"
+        },
+        {
+            "name": "linux-clang",
+            "configurePreset": "linux-clang"
+        },
+        {
+            "name": "linux-clang-coverage",
+            "configurePreset": "linux-clang-coverage"
+        },
+        {
+            "name": "macos-clang",
+            "configurePreset": "macos-clang"
+        },
+        {
+            "name": "macos-clang-coverage",
+            "configurePreset": "macos-clang-coverage"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "windows-clang",
+            "configurePreset": "windows-clang",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "linux-clang",
+            "configurePreset": "linux-clang",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "macos-clang",
+            "configurePreset": "macos-clang",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}
