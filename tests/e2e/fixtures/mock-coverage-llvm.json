@@ -1,0 +1,163 @@
+{
+    "version": "2.0.0",
+    "type": "llvm.coverage.json.export",
+    "data": [
+        {
+            "files": [
+                {
+                    "filename": "src/engine.cpp",
+                    "functions": [
+                        {
+                            "name": "Engine::Initialize",
+                            "count": 10,
+                            "regions": [
+                                [
+                                    5,
+                                    1,
+                                    15,
+                                    2,
+                                    10,
+                                    0,
+                                    0,
+                                    0
+                                ]
+                            ],
+                            "filenames": [
+                                "src/engine.cpp"
+                            ]
+                        },
+                        {
+                            "name": "Engine::Update",
+                            "count": 100,
+                            "regions": [
+                                [
+                                    20,
+                                    1,
+                                    35,
+                                    2,
+                                    100,
+                                    0,
+                                    0,
+                                    0
+                                ]
+                            ],
+                            "filenames": [
+                                "src/engine.cpp"
+                            ]
+                        },
+                        {
+                            "name": "Engine::Shutdown",
+                            "count": 5,
+                            "regions": [
+                                [
+                                    40,
+                                    1,
+                                    50,
+                                    2,
+                                    5,
+                                    0,
+                                    0,
+                                    0
+                                ]
+                            ],
+                            "filenames": [
+                                "src/engine.cpp"
+                            ]
+                        }
+                    ],
+                    "segments": [
+                        [
+                            5,
+                            1,
+                            10,
+                            true,
+                            true
+                        ],
+                        [
+                            15,
+                            2,
+                            0,
+                            false,
+                            false
+                        ],
+                        [
+                            20,
+                            1,
+                            100,
+                            true,
+                            true
+                        ],
+                        [
+                            35,
+                            2,
+                            0,
+                            false,
+                            false
+                        ],
+                        [
+                            40,
+                            1,
+                            5,
+                            true,
+                            true
+                        ],
+                        [
+                            50,
+                            2,
+                            0,
+                            false,
+                            false
+                        ]
+                    ]
+                },
+                {
+                    "filename": "src/utils.cpp",
+                    "functions": [
+                        {
+                            "name": "Utils::Log",
+                            "count": 50,
+                            "regions": [
+                                [
+                                    3,
+                                    1,
+                                    8,
+                                    2,
+                                    50,
+                                    0,
+                                    0,
+                                    0
+                                ]
+                            ],
+                            "filenames": [
+                                "src/utils.cpp"
+                            ]
+                        }
+                    ],
+                    "segments": [
+                        [
+                            3,
+                            1,
+                            50,
+                            true,
+                            true
+                        ],
+                        [
+                            8,
+                            2,
+                            0,
+                            false,
+                            false
+                        ]
+                    ]
+                }
+            ],
+            "totals": {
+                "lines": {
+                    "count": 40,
+                    "covered": 35,
+                    "percent": 87.5
+                }
+            }
+        }
+    ]
+}

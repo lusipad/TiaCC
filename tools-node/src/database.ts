@@ -367,30 +367,50 @@ export class TiaDatabase {
     avgCoverage: number;
     testCount: number;
   }> {
+    // Get raw data first, then process directory extraction in JavaScript
     const stmt = this.db.prepare(`
       SELECT
-        CASE
-          WHEN INSTR(sf.file_path, '/') > 0
-          THEN SUBSTR(sf.file_path, 1,
-            LENGTH(sf.file_path) - LENGTH(SUBSTR(sf.file_path,
-              LENGTH(sf.file_path) - INSTR(REVERSE(sf.file_path), '/') + 2)))
-          ELSE '.'
-        END as directory,
-        COUNT(DISTINCT sf.id) as file_count,
-        AVG(cm.line_coverage_pct) as avg_coverage,
-        COUNT(DISTINCT cm.test_script_id) as test_count
+        sf.file_path,
+        COUNT(DISTINCT cm.test_script_id) as test_count,
+        AVG(cm.line_coverage_pct) as avg_coverage
       FROM source_files sf
       LEFT JOIN coverage_map cm ON sf.id = cm.source_file_id
-      GROUP BY directory
-      ORDER BY file_count DESC
+      GROUP BY sf.file_path
     `);
     const rows = stmt.all() as any[];
-    return rows.map(row => ({
-      directory: row.directory || '.',
-      fileCount: row.file_count,
-      avgCoverage: row.avg_coverage || 0,
-      testCount: row.test_count || 0,
-    }));
+
+    // Group by directory in JavaScript
+    const dirMap = new Map<string, { fileCount: number; avgCoverage: number[]; testCount: number }>();
+
+    for (const row of rows) {
+      const filePath = row.file_path || '';
+      // Extract directory from path
+      const lastSlash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+      const directory = lastSlash > 0 ? filePath.substring(0, lastSlash) : '.';
+
+      if (!dirMap.has(directory)) {
+        dirMap.set(directory, { fileCount: 0, avgCoverage: [], testCount: 0 });
+      }
+
+      const dir = dirMap.get(directory)!;
+      dir.fileCount++;
+      if (row.avg_coverage !== null) {
+        dir.avgCoverage.push(row.avg_coverage);
+      }
+      dir.testCount += row.test_count || 0;
+    }
+
+    // Convert to output format
+    return Array.from(dirMap.entries())
+      .map(([directory, data]) => ({
+        directory,
+        fileCount: data.fileCount,
+        avgCoverage: data.avgCoverage.length > 0
+          ? data.avgCoverage.reduce((a, b) => a + b, 0) / data.avgCoverage.length
+          : 0,
+        testCount: data.testCount,
+      }))
+      .sort((a, b) => b.fileCount - a.fileCount);
   }
 
   // ============ Symbol Operations ============

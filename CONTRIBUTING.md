@@ -1,0 +1,173 @@
+# 贡献指南
+
+感谢您对 TiaCC 项目的关注！我们欢迎任何形式的贡献。
+
+## 如何贡献
+
+### 报告 Bug
+
+1. 确保 Bug 尚未被报告（搜索已有的 Issues）
+2. 创建新的 Issue，使用 Bug 报告模板
+3. 提供详细的复现步骤和环境信息
+
+### 提交功能请求
+
+1. 搜索是否已有类似的功能请求
+2. 创建新的 Issue，描述您期望的功能
+3. 说明使用场景和预期行为
+
+### 提交代码
+
+1. Fork 仓库
+2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 创建 Pull Request
+
+## 开发环境设置
+
+### 前置条件
+
+- Node.js 18+
+- Clang 14+ (C++ 覆盖率)
+- .NET SDK 6+ (C# 覆盖率)
+- CMake 3.20+
+
+### 安装步骤
+
+```bash
+# 克隆仓库
+git clone https://github.com/your-org/TiaCC.git
+cd TiaCC
+
+# 安装 tools-node 依赖
+cd tools-node
+npm install
+
+# 运行测试
+npm test
+```
+
+### 运行端到端测试
+
+```bash
+cd tests/e2e/cpp-project
+# Windows
+run_e2e_test.cmd
+```
+
+## 代码规范
+
+### TypeScript (tools-node)
+
+- 使用 ESLint 和 Prettier
+- 遵循 TypeScript 严格模式
+- 所有公共 API 需要 JSDoc 注释
+
+```bash
+cd tools-node
+npm run lint
+npm run format
+```
+
+### C++
+
+- 使用 clang-format
+- 遵循项目 .clang-format 配置
+
+### C#
+
+- 使用 EditorConfig
+- 遵循 .NET 编码规范
+
+## 提交信息格式
+
+使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式：
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+类型：
+- `feat`: 新功能
+- `fix`: Bug 修复
+- `docs`: 文档更新
+- `style`: 代码格式调整
+- `refactor`: 代码重构
+- `test`: 测试相关
+- `chore`: 构建/工具相关
+
+示例：
+```
+feat(mapper): add support for LLVM JSON format
+
+Add LlvmJsonCoverageParser to parse pre-processed LLVM JSON files
+exported via `llvm-cov export`.
+
+Closes #123
+```
+
+## 项目结构
+
+```
+TiaCC/
+├── src/                      # 源代码
+│   ├── cpp/                  # C++ 覆盖率模块
+│   └── dotnet/               # .NET 覆盖率模块
+├── tools-node/               # CLI 工具 (TypeScript)
+├── clients/                  # 测试框架客户端
+├── tests/
+│   └── e2e/                  # 端到端测试
+├── docs/                     # 文档
+└── example/                  # 示例项目
+```
+
+## 添加新功能
+
+### 添加新的覆盖率格式
+
+1. 在 `tools-node/src/coverage-parser.ts` 中创建新的解析器类
+2. 继承 `CoverageParser` 基类
+3. 实现 `parse()` 方法
+4. 在 `mapper.ts` 中注册新格式
+5. 添加单元测试
+
+```typescript
+export class NewFormatParser extends CoverageParser {
+  getFileExtension(): string {
+    return '.new-format';
+  }
+
+  async parse(coverageFile: string): Promise<CoverageData | null> {
+    // 实现解析逻辑
+  }
+}
+```
+
+### 添加新的测试框架客户端
+
+1. 在 `clients/` 目录创建新语言的客户端
+2. 实现 JSON-RPC 通信接口
+3. 提供 `beforeTest/afterTest` 钩子
+4. 添加使用文档
+
+## 版本发布
+
+遵循 [Semantic Versioning](https://semver.org/)：
+
+- **MAJOR**: 不兼容的 API 更改
+- **MINOR**: 向后兼容的功能添加
+- **PATCH**: 向后兼容的 Bug 修复
+
+## 联系方式
+
+如有问题，请通过以下方式联系：
+
+- Issues: GitHub Issues
+- 邮件: [maintainer@example.com]
+
+再次感谢您的贡献！

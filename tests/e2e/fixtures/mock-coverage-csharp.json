@@ -1,0 +1,23 @@
+{
+  "Calculator.Assembly": {
+    "src/Calculator.cs": {
+      "Calculator.Calculator.Add": {
+        "Lines": { "10": 5, "11": 5, "12": 5 }
+      },
+      "Calculator.Calculator.Subtract": {
+        "Lines": { "15": 3, "16": 3, "17": 3 }
+      },
+      "Calculator.Calculator.Multiply": {
+        "Lines": { "20": 2, "21": 2, "22": 2 }
+      },
+      "Calculator.Calculator.Divide": {
+        "Lines": { "25": 1, "26": 1, "27": 0, "28": 1 }
+      }
+    },
+    "src/Utils.cs": {
+      "Calculator.Utils.Validate": {
+        "Lines": { "5": 10, "6": 10, "7": 10 }
+      }
+    }
+  }
+}

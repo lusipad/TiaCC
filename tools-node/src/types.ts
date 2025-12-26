@@ -40,6 +40,7 @@ export interface DbStats {
 export interface CoverageData {
   testId: string;
   coveredFiles: string[];
+  fileCoverage?: Map<string, number>;  // File path -> coverage percentage
   coveredSymbols?: CoveredSymbol[];  // Function-level coverage
   totalLines: number;
   coveredLines: number;

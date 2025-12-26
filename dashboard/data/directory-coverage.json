@@ -1,10 +1,14 @@
 [
-  { "directory": "src/engine", "fileCount": 3, "avgCoverage": 66.6, "testCount": 4 },
-  { "directory": "src/core", "fileCount": 3, "avgCoverage": 57.3, "testCount": 4 },
-  { "directory": "src/utils", "fileCount": 3, "avgCoverage": 70.0, "testCount": 4 },
-  { "directory": "src/network", "fileCount": 3, "avgCoverage": 70.2, "testCount": 1 },
-  { "directory": "src/ui", "fileCount": 3, "avgCoverage": 75.6, "testCount": 1 },
-  { "directory": "src/data", "fileCount": 3, "avgCoverage": 56.5, "testCount": 1 },
-  { "directory": "src/game", "fileCount": 4, "avgCoverage": 50.7, "testCount": 2 },
-  { "directory": "src/ai", "fileCount": 2, "avgCoverage": 60.7, "testCount": 2 }
+  {
+    "directory": "tests",
+    "fileCount": 4,
+    "avgCoverage": 95.4075,
+    "testCount": 4
+  },
+  {
+    "directory": "src",
+    "fileCount": 3,
+    "avgCoverage": 64.375,
+    "testCount": 5
+  }
 ]

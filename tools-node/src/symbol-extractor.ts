@@ -7,17 +7,26 @@ import { Symbol, SymbolType, CoveredSymbol } from './types.js';
 
 /**
  * LLVM Coverage JSON structure (from llvm-cov export)
+ * Note: functions can be at data[].functions level (top-level) 
+ * or at data[].files[].functions level (per-file)
  */
 interface LlvmCoverageData {
   data: Array<{
     files: Array<{
       filename: string;
-      functions: Array<{
+      functions?: Array<{
         name: string;
         count: number;
         regions: Array<[number, number, number, number, number, number, number, number?]>;
       }>;
       segments?: Array<[number, number, number, boolean, boolean, boolean?]>;
+    }>;
+    // Top-level functions array (LLVM default export format)
+    functions?: Array<{
+      name: string;
+      count: number;
+      filenames: string[];
+      regions: Array<[number, number, number, number, number, number, number, number?]>;
     }>;
   }>;
 }
@@ -72,25 +81,55 @@ export class SymbolExtractor {
   /**
    * Extract symbols from LLVM coverage export JSON
    * LLVM format already contains function-level information
+   * Note: functions can be at data[].functions (top-level) or data[].files[].functions (per-file)
    */
   extractFromLlvmCov(coverageJson: LlvmCoverageData): CoveredSymbol[] {
     const symbols: CoveredSymbol[] = [];
 
     for (const dataEntry of coverageJson.data || []) {
-      for (const file of dataEntry.files || []) {
-        const filePath = this.normalizePath(file.filename);
+      // Try top-level functions first (LLVM default export format)
+      if (dataEntry.functions && dataEntry.functions.length > 0) {
+        for (const func of dataEntry.functions) {
+          // Get file path from filenames array
+          const filePath = func.filenames?.[0]
+            ? this.normalizePath(func.filenames[0])
+            : 'unknown';
 
-        for (const func of file.functions || []) {
           // Parse regions to get line range
           const lineRange = this.extractLineRangeFromRegions(func.regions);
 
           if (lineRange) {
-            // Determine symbol type from name
+            // Demangle C++ name for better readability
+            const displayName = this.demangleCppName(func.name);
             const symbolType = this.inferSymbolType(func.name);
 
             symbols.push({
               filePath,
-              name: func.name,
+              name: displayName,
+              type: symbolType,
+              startLine: lineRange.start,
+              endLine: lineRange.end,
+              hitCount: func.count,
+              lineCoveragePct: this.calculateCoverageFromRegions(func.regions),
+            });
+          }
+        }
+      }
+
+      // Also check per-file functions (older format)
+      for (const file of dataEntry.files || []) {
+        const filePath = this.normalizePath(file.filename);
+
+        for (const func of file.functions || []) {
+          const lineRange = this.extractLineRangeFromRegions(func.regions);
+
+          if (lineRange) {
+            const displayName = this.demangleCppName(func.name);
+            const symbolType = this.inferSymbolType(func.name);
+
+            symbols.push({
+              filePath,
+              name: displayName,
               type: symbolType,
               startLine: lineRange.start,
               endLine: lineRange.end,
@@ -103,6 +142,29 @@ export class SymbolExtractor {
     }
 
     return symbols;
+  }
+
+  /**
+   * Simple C++ name demangling for MSVC names
+   * Converts ?name@Class@@... format to Class::name
+   */
+  private demangleCppName(mangledName: string): string {
+    // MSVC mangled names start with ?
+    if (!mangledName.startsWith('?')) {
+      return mangledName;
+    }
+
+    // Extract method name and class name from MSVC mangled name
+    // Format: ?methodName@ClassName@@...
+    const match = mangledName.match(/^\?([^@]+)@([^@]+)@@/);
+    if (match) {
+      const methodName = match[1];
+      const className = match[2];
+      return `${className}::${methodName}`;
+    }
+
+    // Fallback: remove leading ? and @@ suffix
+    return mangledName.replace(/^\?/, '').replace(/@@.*$/, '');
   }
 
   /**

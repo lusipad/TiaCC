@@ -12,7 +12,7 @@ import ora from 'ora';
 import * as fs from 'fs';
 import * as path from 'path';
 import { initDatabase } from '../database.js';
-import { CppCoverageParser, CSharpCoverageParser } from '../coverage-parser.js';
+import { CppCoverageParser, CSharpCoverageParser, LlvmJsonCoverageParser } from '../coverage-parser.js';
 import { GitUtils } from '../git-utils.js';
 
 const program = new Command();
@@ -28,6 +28,7 @@ program
   .option('-c, --coverage-dir <dir>', 'Directory containing coverage files', './coverage_data')
   .option('-d, --db <path>', 'Output database path', 'impact_map.db')
   .option('-e, --executable <path>', 'Path to instrumented executable (for C++ coverage)')
+  .option('-b, --base-path <path>', 'Base path to strip from source file paths (for portable paths)')
   .option('--commit <hash>', 'Git commit hash to associate with this run')
   .option('-v, --verbose', 'Enable verbose output')
   .action(async (options) => {
@@ -45,16 +46,34 @@ program
         commit = await git.getCurrentCommitHash(true);
       }
 
+      // Path normalization helper
+      const basePath = options.basePath
+        ? path.resolve(options.basePath).replace(/\\/g, '/')
+        : null;
+
+      const normalizePath = (filePath: string): string => {
+        let normalized = filePath.replace(/\\/g, '/');
+        if (basePath && normalized.startsWith(basePath)) {
+          normalized = normalized.slice(basePath.length);
+          if (normalized.startsWith('/')) {
+            normalized = normalized.slice(1);
+          }
+        }
+        return normalized;
+      };
+
       // Find all coverage files
       spinner.text = 'Scanning for coverage files...';
 
       const profrawFiles = await glob('*.profraw', { cwd: options.coverageDir });
+      const llvmJsonFiles = await glob('*.cov.json', { cwd: options.coverageDir });  // Pre-processed LLVM JSON
       const coverletFiles = await glob('*.coverage.json', { cwd: options.coverageDir });
 
-      spinner.info(`Found ${profrawFiles.length} C++ coverage files`);
+      spinner.info(`Found ${profrawFiles.length} C++ profraw files`);
+      spinner.info(`Found ${llvmJsonFiles.length} LLVM JSON files`);
       spinner.info(`Found ${coverletFiles.length} C# coverage files`);
 
-      if (profrawFiles.length === 0 && coverletFiles.length === 0) {
+      if (profrawFiles.length === 0 && llvmJsonFiles.length === 0 && coverletFiles.length === 0) {
         spinner.warn('No coverage files found.');
         db.close();
         return;
@@ -120,6 +139,64 @@ program
         }
 
         spinner.succeed(`Processed ${profrawFiles.length} C++ coverage files`);
+      }
+
+      // Process pre-processed LLVM JSON coverage files
+      if (llvmJsonFiles.length > 0) {
+        spinner.start('Processing LLVM JSON coverage files...');
+        const llvmJsonParser = new LlvmJsonCoverageParser();
+
+        for (let i = 0; i < llvmJsonFiles.length; i++) {
+          const file = llvmJsonFiles[i];
+          spinner.text = `Processing LLVM JSON [${i + 1}/${llvmJsonFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await llvmJsonParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            // File-level mappings with coverage percentage
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              // Get coverage percentage for this file
+              const coveragePct = data.fileCoverage?.get(sourcePath) ?? 0;
+              db.addCoverageMapping(sourceId, testId, coveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            // Symbol-level mappings (functions/methods)
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${llvmJsonFiles.length} LLVM JSON coverage files`);
       }
 
       // Process C# coverage files
@@ -369,6 +446,25 @@ program
       const sourceIdMap = new Map(sourceFiles.map(sf => [sf.filePath, sf.id]));
       const testIdMap = new Map(testScripts.map(ts => [ts.scriptPath, ts.id]));
 
+      // Add function nodes from symbol mappings
+      const addedFunctions = new Set<string>();
+      for (const sym of symbolMappings) {
+        const funcId = `func:${sym.symbolId}`;
+        const sourceId = sourceIdMap.get(sym.sourceFile);
+
+        if (!addedFunctions.has(funcId) && sourceId !== undefined) {
+          addedFunctions.add(funcId);
+          nodes.push({
+            id: funcId,
+            type: 'function' as const,
+            label: sym.symbolName,
+            parent: `source:${sourceId}`, // Link to parent node ID
+            startLine: sym.startLine,
+            endLine: sym.endLine,
+          });
+        }
+      }
+
       // Add links
       for (const m of mappings) {
         const sourceId = sourceIdMap.get(m.sourceFile);
@@ -379,6 +475,34 @@ program
             target: `test:${testId}`,
             coverage: m.lineCoveragePct,
           });
+        }
+      }
+
+      // Add function-level links (function -> test)
+      for (const sym of symbolMappings) {
+        for (const test of sym.tests) {
+          const testId = testIdMap.get(test.testPath);
+          if (testId !== undefined) {
+            links.push({
+              source: `func:${sym.symbolId}`,
+              target: `test:${testId}`,
+              coverage: test.coverage,
+            });
+          }
+        }
+      }
+
+      // Add function-level links (function -> test)
+      for (const sym of symbolMappings) {
+        for (const test of sym.tests) {
+          const testId = testIdMap.get(test.testPath);
+          if (testId !== undefined) {
+            links.push({
+              source: `func:${sym.symbolId}`,
+              target: `test:${testId}`,
+              coverage: test.coverage,
+            });
+          }
         }
       }
 

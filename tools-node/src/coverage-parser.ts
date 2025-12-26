@@ -157,6 +157,137 @@ export class CppCoverageParser extends CoverageParser {
 }
 
 /**
+ * Parser for pre-processed LLVM JSON coverage files (*.cov.json)
+ * These are files already exported via `llvm-cov export`
+ */
+export class LlvmJsonCoverageParser extends CoverageParser {
+  private symbolExtractor: SymbolExtractor;
+
+  constructor() {
+    super();
+    this.symbolExtractor = new SymbolExtractor();
+  }
+
+  getFileExtension(): string {
+    return '.cov.json';
+  }
+
+  async parse(coverageFile: string): Promise<CoverageData | null> {
+    if (!existsSync(coverageFile)) {
+      console.error(`Coverage file not found: ${coverageFile}`);
+      return null;
+    }
+
+    // Extract test ID: test_xxx.cov.json -> test_xxx
+    const testId = basename(coverageFile).replace('.cov.json', '');
+
+    try {
+      const content = await readFile(coverageFile, 'utf-8');
+      const coverageJson = JSON.parse(content);
+
+      const { coveredFiles, fileCoverage } = this.extractFilesWithCoverage(coverageJson);
+      const coveredSymbols = this.symbolExtractor.extractFromLlvmCov(coverageJson);
+      const { totalLines, coveredLines } = this.countLines(coverageJson);
+
+      return {
+        testId,
+        coveredFiles,
+        fileCoverage,
+        coveredSymbols,
+        totalLines,
+        coveredLines,
+      };
+    } catch (error) {
+      console.error(`Error parsing LLVM JSON coverage file: ${error}`);
+      return null;
+    }
+  }
+
+  private extractFilesWithCoverage(coverageJson: any): {
+    coveredFiles: string[];
+    fileCoverage: Map<string, number>;
+  } {
+    const files: string[] = [];
+    const fileCoverage = new Map<string, number>();
+
+    for (const data of coverageJson.data ?? []) {
+      for (const fileData of data.files ?? []) {
+        const filename = fileData.filename;
+        if (!filename) continue;
+
+        // Calculate coverage for this file
+        const summary = fileData.summary;
+        let coveragePct = 0;
+
+        if (summary?.lines) {
+          const totalLines = summary.lines.count || 0;
+          const coveredLines = summary.lines.covered || 0;
+          if (totalLines > 0) {
+            coveragePct = (coveredLines / totalLines) * 100;
+          }
+        } else if (summary?.regions) {
+          // Fallback to region coverage
+          const totalRegions = summary.regions.count || 0;
+          const coveredRegions = summary.regions.covered || 0;
+          if (totalRegions > 0) {
+            coveragePct = (coveredRegions / totalRegions) * 100;
+          }
+        } else {
+          // Calculate from segments if no summary
+          const segments = fileData.segments ?? [];
+          let totalSegs = 0;
+          let coveredSegs = 0;
+          for (const seg of segments) {
+            if (seg.length >= 4 && seg[3]) { // hasCount
+              totalSegs++;
+              if (seg[2] > 0) coveredSegs++;
+            }
+          }
+          if (totalSegs > 0) {
+            coveragePct = (coveredSegs / totalSegs) * 100;
+          }
+        }
+
+        // Only add files with coverage
+        if (this.hasAnyCoverage(fileData.segments ?? [])) {
+          const normalizedPath = this.normalizePath(filename);
+          files.push(normalizedPath);
+          fileCoverage.set(normalizedPath, Math.round(coveragePct * 100) / 100);
+        }
+      }
+    }
+
+    return { coveredFiles: files.sort(), fileCoverage };
+  }
+
+  private hasAnyCoverage(segments: any[]): boolean {
+    return segments.some(seg => seg.length >= 3 && seg[2] > 0);
+  }
+
+  private countLines(coverageJson: any): { totalLines: number; coveredLines: number } {
+    let total = 0;
+    let covered = 0;
+
+    for (const data of coverageJson.data ?? []) {
+      for (const fileData of data.files ?? []) {
+        for (const segment of fileData.segments ?? []) {
+          if (segment.length >= 4 && segment[3]) {
+            total++;
+            if (segment[2] > 0) covered++;
+          }
+        }
+      }
+    }
+
+    return { totalLines: total, coveredLines: covered };
+  }
+
+  private normalizePath(path: string): string {
+    return path.replace(/\\/g, '/');
+  }
+}
+
+/**
  * Parser for coverlet JSON coverage files
  */
 export class CSharpCoverageParser extends CoverageParser {

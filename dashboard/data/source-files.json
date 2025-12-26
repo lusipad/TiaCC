@@ -1,26 +1,44 @@
 [
-  { "id": 1, "filePath": "src/engine/physics.cpp", "fileHash": "abc123", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 2, "filePath": "src/engine/rendering.cpp", "fileHash": "def456", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 3, "filePath": "src/engine/audio.cpp", "fileHash": "ghi789", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 4, "filePath": "src/core/memory.cpp", "fileHash": "jkl012", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 5, "filePath": "src/core/threading.cpp", "fileHash": "mno345", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 6, "filePath": "src/core/logger.cpp", "fileHash": "pqr678", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 7, "filePath": "src/utils/math.cpp", "fileHash": "stu901", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 8, "filePath": "src/utils/string.cpp", "fileHash": "vwx234", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 9, "filePath": "src/utils/file.cpp", "fileHash": "yza567", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 10, "filePath": "src/network/socket.cpp", "fileHash": "bcd890", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 11, "filePath": "src/network/http.cpp", "fileHash": "efg123", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 12, "filePath": "src/network/websocket.cpp", "fileHash": "hij456", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 13, "filePath": "src/ui/window.cpp", "fileHash": "klm789", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 14, "filePath": "src/ui/button.cpp", "fileHash": "nop012", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 15, "filePath": "src/ui/text.cpp", "fileHash": "qrs345", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 16, "filePath": "src/data/json.cpp", "fileHash": "tuv678", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 17, "filePath": "src/data/xml.cpp", "fileHash": "wxy901", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 18, "filePath": "src/data/database.cpp", "fileHash": "zab234", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 19, "filePath": "src/game/player.cpp", "fileHash": "cde567", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 20, "filePath": "src/game/enemy.cpp", "fileHash": "fgh890", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 21, "filePath": "src/game/item.cpp", "fileHash": "ijk123", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 22, "filePath": "src/game/world.cpp", "fileHash": "lmn456", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 23, "filePath": "src/ai/pathfinding.cpp", "fileHash": "opq789", "lastUpdated": "2025-12-26T10:30:00.000Z" },
-  { "id": 24, "filePath": "src/ai/behavior.cpp", "fileHash": "rst012", "lastUpdated": "2025-12-26T10:30:00.000Z" }
+  {
+    "id": 5,
+    "filePath": "src/calculator.cpp",
+    "fileHash": null,
+    "lastUpdated": "2025-12-26T06:13:33.930Z"
+  },
+  {
+    "id": 3,
+    "filePath": "src/statistics.cpp",
+    "fileHash": null,
+    "lastUpdated": "2025-12-26T06:13:33.908Z"
+  },
+  {
+    "id": 1,
+    "filePath": "src/string_utils.cpp",
+    "fileHash": null,
+    "lastUpdated": "2025-12-26T06:13:33.914Z"
+  },
+  {
+    "id": 7,
+    "filePath": "tests/test_calculator_advanced.cpp",
+    "fileHash": null,
+    "lastUpdated": "2025-12-26T06:13:33.926Z"
+  },
+  {
+    "id": 6,
+    "filePath": "tests/test_calculator_basic.cpp",
+    "fileHash": null,
+    "lastUpdated": "2025-12-26T06:13:33.918Z"
+  },
+  {
+    "id": 4,
+    "filePath": "tests/test_statistics.cpp",
+    "fileHash": null,
+    "lastUpdated": "2025-12-26T06:13:33.905Z"
+  },
+  {
+    "id": 2,
+    "filePath": "tests/test_string_utils.cpp",
+    "fileHash": null,
+    "lastUpdated": "2025-12-26T06:13:33.895Z"
+  }
 ]
