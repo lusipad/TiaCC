@@ -1,5 +1,7 @@
 # TiaCC 集成指南
 
+> 📖 相关文档：[架构设计](architecture.md) | [E2E 测试](../tests/e2e/README.md)
+
 ## 概述
 
 将 TiaCC 集成到现有项目需要以下步骤：
@@ -11,10 +13,14 @@
 │  1. C++/C# 代码 ──编译时插桩──> 带覆盖率的可执行文件          │
 │  2. Lua 测试框架 ──IPC──> TiaCC 覆盖率服务                   │
 │  3. 测试运行 ──生成──> .profraw / .coverage.json            │
-│  4. Nightly CI ──映射生成──> impact_map.db                  │
-│  5. PR/提交时 ──推荐──> 受影响的测试列表                      │
+│  4. 处理覆盖率 ──llvm-cov──> .cov.json (预处理 JSON)        │
+│  5. Nightly CI ──tia-mapper──> impact_map.db                │
+│  6. PR/提交时 ──tia-recommend──> 受影响的测试列表            │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**新增支持**: 现在 TiaCC 支持直接使用预处理的 LLVM JSON 文件 (`.cov.json`)，
+无需在 CI 中实时调用 llvm-cov，大大简化了集成流程。
 
 ---
 
