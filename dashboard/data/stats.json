@@ -1,0 +1,30 @@
+{
+  "sourceFiles": 24,
+  "testScripts": 12,
+  "mappings": 48,
+  "latestRun": {
+    "id": 15,
+    "runDate": "2025-12-26T10:30:00.000Z",
+    "totalTests": 12,
+    "totalSources": 24,
+    "commitHash": "40a6499b8f7c2d3e4a5b6c7d8e9f0a1b2c3d4e5f"
+  },
+  "runHistory": [
+    { "id": 15, "runDate": "2025-12-26T10:30:00.000Z", "totalTests": 12, "totalSources": 24, "totalMappings": 48, "avgCoverage": 68.5, "commitHash": "40a6499" },
+    { "id": 14, "runDate": "2025-12-25T15:20:00.000Z", "totalTests": 12, "totalSources": 23, "totalMappings": 46, "avgCoverage": 66.2, "commitHash": "8937e36" },
+    { "id": 13, "runDate": "2025-12-24T09:15:00.000Z", "totalTests": 11, "totalSources": 22, "totalMappings": 44, "avgCoverage": 65.8, "commitHash": "10f2564" },
+    { "id": 12, "runDate": "2025-12-23T14:45:00.000Z", "totalTests": 11, "totalSources": 21, "totalMappings": 42, "avgCoverage": 64.1, "commitHash": "a3b4c5d" },
+    { "id": 11, "runDate": "2025-12-22T11:30:00.000Z", "totalTests": 10, "totalSources": 20, "totalMappings": 38, "avgCoverage": 62.5, "commitHash": "b4c5d6e" },
+    { "id": 10, "runDate": "2025-12-21T16:00:00.000Z", "totalTests": 10, "totalSources": 19, "totalMappings": 36, "avgCoverage": 60.3, "commitHash": "c5d6e7f" },
+    { "id": 9, "runDate": "2025-12-20T10:15:00.000Z", "totalTests": 9, "totalSources": 18, "totalMappings": 34, "avgCoverage": 58.7, "commitHash": "d6e7f8a" },
+    { "id": 8, "runDate": "2025-12-19T13:45:00.000Z", "totalTests": 9, "totalSources": 17, "totalMappings": 32, "avgCoverage": 55.2, "commitHash": "e7f8a9b" },
+    { "id": 7, "runDate": "2025-12-18T09:30:00.000Z", "totalTests": 8, "totalSources": 16, "totalMappings": 28, "avgCoverage": 52.8, "commitHash": "f8a9b0c" },
+    { "id": 6, "runDate": "2025-12-17T15:00:00.000Z", "totalTests": 8, "totalSources": 15, "totalMappings": 26, "avgCoverage": 50.1, "commitHash": "a9b0c1d" },
+    { "id": 5, "runDate": "2025-12-16T11:20:00.000Z", "totalTests": 7, "totalSources": 14, "totalMappings": 24, "avgCoverage": 48.5, "commitHash": "b0c1d2e" },
+    { "id": 4, "runDate": "2025-12-15T14:30:00.000Z", "totalTests": 7, "totalSources": 12, "totalMappings": 20, "avgCoverage": 45.2, "commitHash": "c1d2e3f" },
+    { "id": 3, "runDate": "2025-12-14T10:00:00.000Z", "totalTests": 6, "totalSources": 10, "totalMappings": 16, "avgCoverage": 42.8, "commitHash": "d2e3f4a" },
+    { "id": 2, "runDate": "2025-12-13T16:45:00.000Z", "totalTests": 5, "totalSources": 8, "totalMappings": 12, "avgCoverage": 38.5, "commitHash": "e3f4a5b" },
+    { "id": 1, "runDate": "2025-12-12T09:00:00.000Z", "totalTests": 4, "totalSources": 6, "totalMappings": 8, "avgCoverage": 35.0, "commitHash": "f4a5b6c" }
+  ],
+  "exportedAt": "2025-12-26T12:00:00.000Z"
+}

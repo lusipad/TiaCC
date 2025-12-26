@@ -1,0 +1,123 @@
+{
+  "symbols": [
+    {
+      "symbolId": 1,
+      "symbolName": "Physics::update",
+      "sourceFile": "src/engine/physics.cpp",
+      "startLine": 45,
+      "endLine": 120,
+      "type": "method",
+      "tests": [
+        { "testPath": "tests/physics_test.lua", "coverage": 85.5 },
+        { "testPath": "tests/player_test.lua", "coverage": 42.3 }
+      ]
+    },
+    {
+      "symbolId": 2,
+      "symbolName": "Physics::reset",
+      "sourceFile": "src/engine/physics.cpp",
+      "startLine": 125,
+      "endLine": 145,
+      "type": "method",
+      "tests": [
+        { "testPath": "tests/physics_test.lua", "coverage": 92.0 }
+      ]
+    },
+    {
+      "symbolId": 3,
+      "symbolName": "Math::lerp",
+      "sourceFile": "src/utils/math.cpp",
+      "startLine": 23,
+      "endLine": 35,
+      "type": "function",
+      "tests": [
+        { "testPath": "tests/math_test.lua", "coverage": 97.2 },
+        { "testPath": "tests/physics_test.lua", "coverage": 68.1 }
+      ]
+    },
+    {
+      "symbolId": 4,
+      "symbolName": "Math::clamp",
+      "sourceFile": "src/utils/math.cpp",
+      "startLine": 40,
+      "endLine": 52,
+      "type": "function",
+      "tests": [
+        { "testPath": "tests/math_test.lua", "coverage": 100.0 },
+        { "testPath": "tests/player_test.lua", "coverage": 55.0 }
+      ]
+    },
+    {
+      "symbolId": 5,
+      "symbolName": "Renderer::draw",
+      "sourceFile": "src/graphics/renderer.cpp",
+      "startLine": 80,
+      "endLine": 200,
+      "type": "method",
+      "tests": [
+        { "testPath": "tests/render_test.lua", "coverage": 72.5 }
+      ]
+    },
+    {
+      "symbolId": 6,
+      "symbolName": "Renderer::clear",
+      "sourceFile": "src/graphics/renderer.cpp",
+      "startLine": 205,
+      "endLine": 220,
+      "type": "method",
+      "tests": [
+        { "testPath": "tests/render_test.lua", "coverage": 88.0 }
+      ]
+    },
+    {
+      "symbolId": 7,
+      "symbolName": "Player::move",
+      "sourceFile": "src/game/player.cpp",
+      "startLine": 50,
+      "endLine": 95,
+      "type": "method",
+      "tests": [
+        { "testPath": "tests/player_test.lua", "coverage": 78.3 },
+        { "testPath": "tests/physics_test.lua", "coverage": 45.0 }
+      ]
+    },
+    {
+      "symbolId": 8,
+      "symbolName": "Player::jump",
+      "sourceFile": "src/game/player.cpp",
+      "startLine": 100,
+      "endLine": 130,
+      "type": "method",
+      "tests": [
+        { "testPath": "tests/player_test.lua", "coverage": 91.5 }
+      ]
+    },
+    {
+      "symbolId": 9,
+      "symbolName": "AudioManager::play",
+      "sourceFile": "src/audio/audio_manager.cpp",
+      "startLine": 30,
+      "endLine": 75,
+      "type": "method",
+      "tests": [
+        { "testPath": "tests/audio_test.lua", "coverage": 65.0 }
+      ]
+    },
+    {
+      "symbolId": 10,
+      "symbolName": "Config::load",
+      "sourceFile": "src/core/config.cpp",
+      "startLine": 15,
+      "endLine": 60,
+      "type": "method",
+      "tests": [
+        { "testPath": "tests/config_test.lua", "coverage": 82.0 },
+        { "testPath": "tests/integration_test.lua", "coverage": 70.0 }
+      ]
+    }
+  ],
+  "stats": {
+    "symbols": 10,
+    "symbolMappings": 16
+  }
+}

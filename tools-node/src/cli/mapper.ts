@@ -9,6 +9,8 @@
 import { Command } from 'commander';
 import { glob } from 'glob';
 import ora from 'ora';
+import * as fs from 'fs';
+import * as path from 'path';
 import { initDatabase } from '../database.js';
 import { CppCoverageParser, CSharpCoverageParser } from '../coverage-parser.js';
 import { GitUtils } from '../git-utils.js';
@@ -65,6 +67,8 @@ program
       const totalSources = new Set<string>();
       let totalTests = 0;
 
+      let totalSymbols = 0;
+
       // Process C++ coverage files
       if (profrawFiles.length > 0) {
         spinner.start('Processing C++ coverage files...');
@@ -80,14 +84,37 @@ program
             totalTests++;
             const testId = db.upsertTestScript(data.testId);
 
+            // File-level mappings
             for (const sourcePath of data.coveredFiles) {
               const sourceId = db.upsertSourceFile(sourcePath);
               db.addCoverageMapping(sourceId, testId);
               totalSources.add(sourcePath);
             }
 
+            // Symbol-level mappings (functions/methods)
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const sourceId = db.upsertSourceFile(sym.filePath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
             if (options.verbose) {
-              console.log(`  ${data.testId}: ${data.coveredFiles.length} files`);
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
             }
           }
         }
@@ -114,14 +141,37 @@ program
               ? (data.coveredLines / data.totalLines) * 100
               : 0;
 
+            // File-level mappings
             for (const sourcePath of data.coveredFiles) {
               const sourceId = db.upsertSourceFile(sourcePath);
               db.addCoverageMapping(sourceId, testId, coveragePct);
               totalSources.add(sourcePath);
             }
 
+            // Symbol-level mappings (classes/methods)
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const sourceId = db.upsertSourceFile(sym.filePath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
             if (options.verbose) {
-              console.log(`  ${data.testId}: ${data.coveredFiles.length} files`);
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
             }
           }
         }
@@ -138,7 +188,8 @@ program
       console.log('Build Complete!');
       console.log(`  Source files: ${stats.sourceFiles}`);
       console.log(`  Test scripts: ${stats.testScripts}`);
-      console.log(`  Mappings: ${stats.mappings}`);
+      console.log(`  File mappings: ${stats.mappings}`);
+      console.log(`  Symbol mappings: ${totalSymbols}`);
       console.log(`  Commit: ${commit ?? 'N/A'}`);
 
       db.close();
@@ -190,6 +241,168 @@ program
     }
 
     db.close();
+  });
+
+program
+  .command('export')
+  .description('Export database to JSON for visualization dashboard')
+  .option('-d, --db <path>', 'Database path', 'impact_map.db')
+  .option('-o, --output <dir>', 'Output directory for JSON files', './dashboard/data')
+  .action((options) => {
+    const spinner = ora('Exporting data...').start();
+
+    try {
+      const db = initDatabase(options.db);
+
+      // Create output directory
+      if (!fs.existsSync(options.output)) {
+        fs.mkdirSync(options.output, { recursive: true });
+      }
+
+      // Export statistics
+      spinner.text = 'Exporting statistics...';
+      const stats = db.getStats();
+      const latestRun = db.getLatestRun();
+      const runs = db.getAllRuns();
+
+      const statsData = {
+        ...stats,
+        latestRun,
+        runHistory: runs,
+        exportedAt: new Date().toISOString(),
+      };
+      fs.writeFileSync(
+        path.join(options.output, 'stats.json'),
+        JSON.stringify(statsData, null, 2)
+      );
+
+      // Export source files
+      spinner.text = 'Exporting source files...';
+      const sourceFiles = db.getAllSourceFiles();
+      fs.writeFileSync(
+        path.join(options.output, 'source-files.json'),
+        JSON.stringify(sourceFiles, null, 2)
+      );
+
+      // Export test scripts
+      spinner.text = 'Exporting test scripts...';
+      const testScripts = db.getAllTestScripts();
+      fs.writeFileSync(
+        path.join(options.output, 'test-scripts.json'),
+        JSON.stringify(testScripts, null, 2)
+      );
+
+      // Export mappings
+      spinner.text = 'Exporting coverage mappings...';
+      const mappings = db.getAllMappings();
+      fs.writeFileSync(
+        path.join(options.output, 'mappings.json'),
+        JSON.stringify(mappings, null, 2)
+      );
+
+      // Export directory coverage (for treemap)
+      spinner.text = 'Exporting directory coverage...';
+      const dirCoverage = db.getCoverageByDirectory();
+      fs.writeFileSync(
+        path.join(options.output, 'directory-coverage.json'),
+        JSON.stringify(dirCoverage, null, 2)
+      );
+
+      // Export symbols (function-level data)
+      spinner.text = 'Exporting symbols...';
+      const symbols = db.getAllSymbols();
+      const symbolStats = db.getSymbolStats();
+
+      // Build symbol -> tests mapping for export
+      const symbolMappings: Array<{
+        symbolId: number;
+        symbolName: string;
+        sourceFile: string;
+        startLine: number;
+        endLine: number;
+        type: string;
+        tests: Array<{ testPath: string; coverage: number }>;
+      }> = [];
+
+      for (const sym of symbols) {
+        const sourceFile = sourceFiles.find(sf => sf.id === sym.sourceFileId);
+        if (sourceFile) {
+          const tests = db.getTestsForSymbols([sym.id!]);
+          symbolMappings.push({
+            symbolId: sym.id!,
+            symbolName: sym.name,
+            sourceFile: sourceFile.filePath,
+            startLine: sym.startLine,
+            endLine: sym.endLine,
+            type: sym.type,
+            tests: tests.map(t => ({ testPath: t.testPath, coverage: t.coverage })),
+          });
+        }
+      }
+
+      fs.writeFileSync(
+        path.join(options.output, 'symbols.json'),
+        JSON.stringify({
+          symbols: symbolMappings,
+          stats: symbolStats,
+        }, null, 2)
+      );
+
+      // Build graph data for D3 force-directed graph
+      spinner.text = 'Building graph data...';
+      const nodes: Array<{ id: string; type: 'source' | 'test' | 'function'; label: string; parent?: string }> = [];
+      const links: Array<{ source: string; target: string; coverage: number }> = [];
+
+      // Add source file nodes
+      for (const sf of sourceFiles) {
+        const fileName = sf.filePath.split(/[/\\]/).pop() || sf.filePath;
+        nodes.push({ id: `source:${sf.id}`, type: 'source', label: fileName });
+      }
+
+      // Add test script nodes
+      for (const ts of testScripts) {
+        const testName = ts.scriptPath.split(/[/\\]/).pop() || ts.scriptPath;
+        nodes.push({ id: `test:${ts.id}`, type: 'test', label: testName });
+      }
+
+      // Build source/test ID lookup maps
+      const sourceIdMap = new Map(sourceFiles.map(sf => [sf.filePath, sf.id]));
+      const testIdMap = new Map(testScripts.map(ts => [ts.scriptPath, ts.id]));
+
+      // Add links
+      for (const m of mappings) {
+        const sourceId = sourceIdMap.get(m.sourceFile);
+        const testId = testIdMap.get(m.testScript);
+        if (sourceId !== undefined && testId !== undefined) {
+          links.push({
+            source: `source:${sourceId}`,
+            target: `test:${testId}`,
+            coverage: m.lineCoveragePct,
+          });
+        }
+      }
+
+      const graphData = { nodes, links };
+      fs.writeFileSync(
+        path.join(options.output, 'graph.json'),
+        JSON.stringify(graphData, null, 2)
+      );
+
+      db.close();
+
+      spinner.succeed(`Data exported to ${options.output}/`);
+      console.log('  - stats.json');
+      console.log('  - source-files.json');
+      console.log('  - test-scripts.json');
+      console.log('  - mappings.json');
+      console.log('  - directory-coverage.json');
+      console.log('  - symbols.json');
+      console.log('  - graph.json');
+
+    } catch (error) {
+      spinner.fail(`Error: ${error}`);
+      process.exit(1);
+    }
   });
 
 program.parse();

@@ -1,12 +1,14 @@
 /**
  * Coverage data parsers for LLVM and coverlet formats.
+ * Extended to support function-level symbol extraction.
  */
 
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { basename, extname } from 'path';
-import type { CoverageData } from './types.js';
+import type { CoverageData, CoveredSymbol } from './types.js';
+import { SymbolExtractor } from './symbol-extractor.js';
 
 /**
  * Abstract base class for coverage parsers
@@ -23,6 +25,7 @@ export class CppCoverageParser extends CoverageParser {
   private llvmProfdata: string;
   private llvmCov: string;
   private executable?: string;
+  private symbolExtractor: SymbolExtractor;
 
   constructor(options: {
     llvmProfdata?: string;
@@ -33,6 +36,7 @@ export class CppCoverageParser extends CoverageParser {
     this.llvmProfdata = options.llvmProfdata ?? 'llvm-profdata';
     this.llvmCov = options.llvmCov ?? 'llvm-cov';
     this.executable = options.executable;
+    this.symbolExtractor = new SymbolExtractor();
   }
 
   getFileExtension(): string {
@@ -69,16 +73,42 @@ export class CppCoverageParser extends CoverageParser {
       const coverageJson = JSON.parse(output);
       const coveredFiles = this.extractFiles(coverageJson);
 
+      // Step 3: Extract function-level symbols
+      const coveredSymbols = this.symbolExtractor.extractFromLlvmCov(coverageJson);
+
+      // Step 4: Calculate line coverage
+      const { totalLines, coveredLines } = this.countLines(coverageJson);
+
       return {
         testId,
         coveredFiles,
-        totalLines: 0,
-        coveredLines: 0,
+        coveredSymbols,
+        totalLines,
+        coveredLines,
       };
     } catch (error) {
       console.error(`Error parsing coverage: ${error}`);
       return null;
     }
+  }
+
+  private countLines(coverageJson: any): { totalLines: number; coveredLines: number } {
+    let total = 0;
+    let covered = 0;
+
+    for (const data of coverageJson.data ?? []) {
+      for (const fileData of data.files ?? []) {
+        for (const segment of fileData.segments ?? []) {
+          // LLVM segment format: [line, col, count, hasCount, isRegionEntry, isGapRegion?]
+          if (segment.length >= 4 && segment[3]) {
+            total++;
+            if (segment[2] > 0) covered++;
+          }
+        }
+      }
+    }
+
+    return { totalLines: total, coveredLines: covered };
   }
 
   private runCommand(cmd: string, args: string[]): Promise<string> {
@@ -130,6 +160,13 @@ export class CppCoverageParser extends CoverageParser {
  * Parser for coverlet JSON coverage files
  */
 export class CSharpCoverageParser extends CoverageParser {
+  private symbolExtractor: SymbolExtractor;
+
+  constructor() {
+    super();
+    this.symbolExtractor = new SymbolExtractor();
+  }
+
   getFileExtension(): string {
     return '.coverage.json';
   }
@@ -149,9 +186,13 @@ export class CSharpCoverageParser extends CoverageParser {
       const coveredFiles = this.extractFiles(coverageJson);
       const { totalLines, coveredLines } = this.countLines(coverageJson);
 
+      // Extract method-level symbols for C#
+      const coveredSymbols = this.symbolExtractor.extractFromCoverlet(coverageJson);
+
       return {
         testId,
         coveredFiles,
+        coveredSymbols,
         totalLines,
         coveredLines,
       };

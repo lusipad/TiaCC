@@ -40,8 +40,51 @@ export interface DbStats {
 export interface CoverageData {
   testId: string;
   coveredFiles: string[];
+  coveredSymbols?: CoveredSymbol[];  // Function-level coverage
   totalLines: number;
   coveredLines: number;
+}
+
+// ============ Symbol-level types ============
+
+export type SymbolType = 'function' | 'method' | 'class' | 'namespace';
+
+export interface Symbol {
+  id?: number;
+  sourceFileId: number;
+  name: string;
+  type: SymbolType;
+  startLine: number;
+  endLine: number;
+  signature?: string;
+}
+
+export interface CoveredSymbol {
+  filePath: string;
+  name: string;
+  type: SymbolType;
+  startLine: number;
+  endLine: number;
+  hitCount: number;
+  lineCoveragePct?: number;
+}
+
+export interface SymbolCoverage {
+  symbolId: number;
+  testScriptId: number;
+  hitCount: number;
+  lineCoveragePct: number;
+}
+
+export interface FunctionTestMapping {
+  functionName: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  tests: Array<{
+    testPath: string;
+    coverage: number;
+  }>;
 }
 
 export interface TiaConfig {

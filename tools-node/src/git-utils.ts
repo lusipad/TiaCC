@@ -121,4 +121,94 @@ export class GitUtils {
   async getFilesChangedSince(sinceCommit: string): Promise<string[]> {
     return this.getChangedFiles({ baseRef: sinceCommit });
   }
+
+  /**
+   * Get changed lines for each file (for function-level impact analysis)
+   * Returns a map of file path -> array of changed line numbers
+   */
+  async getChangedLines(options: {
+    baseRef?: string;
+    extensions?: string[];
+  } = {}): Promise<Map<string, number[]>> {
+    const { baseRef = 'HEAD~1', extensions } = options;
+    const result = new Map<string, number[]>();
+
+    try {
+      // Get unified diff with context
+      const diffOutput = await this.git.diff([baseRef, '-U0']);
+
+      let currentFile: string | null = null;
+      const lines = diffOutput.split('\n');
+
+      for (const line of lines) {
+        // Match file header: diff --git a/path b/path
+        const fileMatch = line.match(/^diff --git a\/(.*) b\/(.*)/);
+        if (fileMatch) {
+          currentFile = fileMatch[2];
+
+          // Filter by extension if specified
+          if (extensions && extensions.length > 0) {
+            const ext = '.' + currentFile.split('.').pop()?.toLowerCase();
+            if (!extensions.some(e => e.toLowerCase() === ext)) {
+              currentFile = null;
+            }
+          }
+
+          if (currentFile && !result.has(currentFile)) {
+            result.set(currentFile, []);
+          }
+          continue;
+        }
+
+        // Match hunk header: @@ -old,count +new,count @@
+        if (currentFile && line.startsWith('@@')) {
+          const hunkMatch = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+          if (hunkMatch) {
+            const startLine = parseInt(hunkMatch[1], 10);
+            const lineCount = hunkMatch[2] ? parseInt(hunkMatch[2], 10) : 1;
+
+            const changedLines = result.get(currentFile) || [];
+            for (let i = 0; i < lineCount; i++) {
+              changedLines.push(startLine + i);
+            }
+            result.set(currentFile, changedLines);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Error getting changed lines: ${error}`);
+    }
+
+    return result;
+  }
+
+  /**
+   * Analyze change scale for determining recommendation strategy
+   */
+  async analyzeChangeScale(baseRef: string = 'HEAD~1'): Promise<{
+    totalFiles: number;
+    totalLines: number;
+    scale: 'small' | 'medium' | 'large';
+  }> {
+    const changedLines = await this.getChangedLines({ baseRef });
+
+    let totalLines = 0;
+    for (const lines of changedLines.values()) {
+      totalLines += lines.length;
+    }
+
+    const totalFiles = changedLines.size;
+
+    // Determine scale based on thresholds from plan
+    let scale: 'small' | 'medium' | 'large';
+    if (totalLines < 100) {
+      scale = 'small';
+    } else if (totalLines < 500 && totalFiles < 30) {
+      scale = 'medium';
+    } else {
+      scale = 'large';
+    }
+
+    return { totalFiles, totalLines, scale };
+  }
 }

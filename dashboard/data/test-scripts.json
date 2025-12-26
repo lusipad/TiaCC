@@ -1,0 +1,14 @@
+[
+  { "id": 1, "scriptPath": "tests/engine/test_physics.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 1250 },
+  { "id": 2, "scriptPath": "tests/engine/test_rendering.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 2100 },
+  { "id": 3, "scriptPath": "tests/engine/test_audio.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 890 },
+  { "id": 4, "scriptPath": "tests/core/test_memory.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 450 },
+  { "id": 5, "scriptPath": "tests/core/test_threading.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 780 },
+  { "id": 6, "scriptPath": "tests/utils/test_math.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 320 },
+  { "id": 7, "scriptPath": "tests/utils/test_string.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 280 },
+  { "id": 8, "scriptPath": "tests/network/test_socket.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 1560 },
+  { "id": 9, "scriptPath": "tests/ui/test_window.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 920 },
+  { "id": 10, "scriptPath": "tests/data/test_json.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 410 },
+  { "id": 11, "scriptPath": "tests/game/test_player.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 1890 },
+  { "id": 12, "scriptPath": "tests/ai/test_pathfinding.lua", "lastRun": "2025-12-26T10:30:00.000Z", "avgDurationMs": 2450 }
+]
