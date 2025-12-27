@@ -1,5 +1,5 @@
 /**
- * Coverage data parsers for LLVM and coverlet formats.
+ * Coverage data parsers for LLVM, coverlet, and Cobertura formats.
  * Extended to support function-level symbol extraction.
  */
 
@@ -7,6 +7,7 @@ import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { basename, extname } from 'path';
+import { XMLParser } from 'fast-xml-parser';
 import type { CoverageData, CoveredSymbol } from './types.js';
 import { SymbolExtractor } from './symbol-extractor.js';
 
@@ -402,10 +403,349 @@ export class CSharpCoverageParser extends CoverageParser {
 }
 
 /**
+ * Cobertura XML coverage format structure
+ */
+interface CoberturaXml {
+  coverage: {
+    '@_version'?: string;
+    '@_timestamp'?: string;
+    '@_lines-valid'?: string;
+    '@_lines-covered'?: string;
+    '@_line-rate'?: string;
+    '@_branches-valid'?: string;
+    '@_branches-covered'?: string;
+    '@_branch-rate'?: string;
+    '@_complexity'?: string;
+    sources?: {
+      source: string | string[];
+    };
+    packages?: {
+      package: CoberturaPackage | CoberturaPackage[];
+    };
+  };
+}
+
+interface CoberturaPackage {
+  '@_name': string;
+  '@_line-rate'?: string;
+  '@_branch-rate'?: string;
+  '@_complexity'?: string;
+  classes?: {
+    class: CoberturaClass | CoberturaClass[];
+  };
+}
+
+interface CoberturaClass {
+  '@_name': string;
+  '@_filename': string;
+  '@_line-rate'?: string;
+  '@_branch-rate'?: string;
+  '@_complexity'?: string;
+  methods?: {
+    method: CoberturaMethod | CoberturaMethod[];
+  };
+  lines?: {
+    line: CoberturaLine | CoberturaLine[];
+  };
+}
+
+interface CoberturaMethod {
+  '@_name': string;
+  '@_signature'?: string;
+  '@_line-rate'?: string;
+  '@_branch-rate'?: string;
+  '@_complexity'?: string;
+  lines?: {
+    line: CoberturaLine | CoberturaLine[];
+  };
+}
+
+interface CoberturaLine {
+  '@_number': string;
+  '@_hits': string;
+  '@_branch'?: string;
+  '@_condition-coverage'?: string;
+}
+
+/**
+ * Options for Cobertura parser
+ */
+export interface CoberturaParserOptions {
+  /**
+   * Environment variable name to read testId from.
+   * If set, the testId will be read from process.env[testIdFromEnv].
+   */
+  testIdFromEnv?: string;
+
+  /**
+   * Use the <source> tag content as testId.
+   * This is useful when the source tag contains test method name (e.g., from LuaUnit).
+   */
+  testIdFromSource?: boolean;
+
+  /**
+   * Custom testId to use instead of deriving from filename.
+   */
+  testId?: string;
+}
+
+/**
+ * Parser for Cobertura XML coverage files
+ * Supports custom testId from environment variable or <source> tag
+ */
+export class CoberturaCoverageParser extends CoverageParser {
+  private symbolExtractor: SymbolExtractor;
+  private xmlParser: XMLParser;
+  private options: CoberturaParserOptions;
+
+  constructor(options: CoberturaParserOptions = {}) {
+    super();
+    this.options = options;
+    this.symbolExtractor = new SymbolExtractor();
+    this.xmlParser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+      allowBooleanAttributes: true,
+      parseAttributeValue: false,  // Keep as strings for precise parsing
+    });
+  }
+
+  getFileExtension(): string {
+    return '.xml';
+  }
+
+  async parse(coverageFile: string): Promise<CoverageData | null> {
+    if (!existsSync(coverageFile)) {
+      console.error(`Coverage file not found: ${coverageFile}`);
+      return null;
+    }
+
+    try {
+      const content = await readFile(coverageFile, 'utf-8');
+      const parsed = this.xmlParser.parse(content) as CoberturaXml;
+
+      if (!parsed.coverage) {
+        console.error(`Invalid Cobertura XML format: missing <coverage> root element`);
+        return null;
+      }
+
+      // Determine testId based on options priority:
+      // 1. Explicit testId option
+      // 2. Environment variable (--test-id-from-env)
+      // 3. <source> tag (--test-id-from-source)
+      // 4. Fallback to filename
+      const testId = this.resolveTestId(coverageFile, parsed);
+
+      const { coveredFiles, fileCoverage, totalLines, coveredLines, coveredSymbols } =
+        this.extractCoverageData(parsed);
+
+      return {
+        testId,
+        coveredFiles,
+        fileCoverage,
+        coveredSymbols,
+        totalLines,
+        coveredLines,
+      };
+    } catch (error) {
+      console.error(`Error parsing Cobertura XML coverage file: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Resolve testId based on configuration options
+   */
+  private resolveTestId(coverageFile: string, parsed: CoberturaXml): string {
+    // Priority 1: Explicit testId option
+    if (this.options.testId) {
+      return this.options.testId;
+    }
+
+    // Priority 2: Environment variable
+    if (this.options.testIdFromEnv) {
+      const envValue = process.env[this.options.testIdFromEnv];
+      if (envValue) {
+        return envValue;
+      }
+      console.warn(`Environment variable ${this.options.testIdFromEnv} not set, falling back to filename`);
+    }
+
+    // Priority 3: <source> tag
+    if (this.options.testIdFromSource) {
+      const sourceValue = this.extractSourceAsTestId(parsed);
+      if (sourceValue) {
+        return sourceValue;
+      }
+      console.warn(`No valid <source> tag found, falling back to filename`);
+    }
+
+    // Priority 4: Fallback to filename
+    return basename(coverageFile).replace(/\.(cobertura\.)?xml$/i, '');
+  }
+
+  /**
+   * Extract test method name from <source> tag
+   * Supports LuaUnit-style source tags containing test method names
+   */
+  private extractSourceAsTestId(parsed: CoberturaXml): string | null {
+    const sources = parsed.coverage.sources?.source;
+    if (!sources) {
+      return null;
+    }
+
+    // Handle single source or array of sources
+    const sourceList = Array.isArray(sources) ? sources : [sources];
+
+    // Find the first non-empty, non-path source (likely a test method name)
+    for (const source of sourceList) {
+      if (typeof source === 'string' && source.trim()) {
+        const trimmed = source.trim();
+        // Check if it looks like a test method name rather than a file path
+        // Test method names typically don't contain path separators
+        if (!trimmed.includes('/') && !trimmed.includes('\\')) {
+          return trimmed;
+        }
+        // If it's a path, extract just the last segment as potential test name
+        const lastSegment = trimmed.split(/[/\\]/).pop();
+        if (lastSegment && !lastSegment.includes('.')) {
+          // Doesn't have extension, could be a test method name
+          return lastSegment;
+        }
+      }
+    }
+
+    // If all sources are paths, try to extract meaningful test name from first source
+    if (sourceList.length > 0 && typeof sourceList[0] === 'string') {
+      return sourceList[0].trim();
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract coverage data from parsed Cobertura XML
+   */
+  private extractCoverageData(parsed: CoberturaXml): {
+    coveredFiles: string[];
+    fileCoverage: Map<string, number>;
+    totalLines: number;
+    coveredLines: number;
+    coveredSymbols: CoveredSymbol[];
+  } {
+    const files: string[] = [];
+    const fileCoverage = new Map<string, number>();
+    const coveredSymbols: CoveredSymbol[] = [];
+    let totalLines = 0;
+    let coveredLines = 0;
+
+    const packages = parsed.coverage.packages?.package;
+    if (!packages) {
+      return { coveredFiles: files, fileCoverage, totalLines, coveredLines, coveredSymbols };
+    }
+
+    const packageList = Array.isArray(packages) ? packages : [packages];
+
+    for (const pkg of packageList) {
+      const classes = pkg.classes?.class;
+      if (!classes) continue;
+
+      const classList = Array.isArray(classes) ? classes : [classes];
+
+      for (const cls of classList) {
+        const filename = this.normalizePath(cls['@_filename']);
+        const lineRate = parseFloat(cls['@_line-rate'] ?? '0');
+
+        // Process class-level lines
+        const classLines = this.extractLines(cls.lines);
+        const classTotal = classLines.length;
+        const classCovered = classLines.filter(l => parseInt(l['@_hits']) > 0).length;
+
+        // Add class as symbol
+        if (classLines.length > 0) {
+          const lineNumbers = classLines.map(l => parseInt(l['@_number']));
+          coveredSymbols.push({
+            filePath: filename,
+            name: cls['@_name'],
+            type: 'class',
+            startLine: Math.min(...lineNumbers),
+            endLine: Math.max(...lineNumbers),
+            hitCount: classCovered,
+            lineCoveragePct: lineRate * 100,
+          });
+        }
+
+        // Process methods
+        const methods = cls.methods?.method;
+        if (methods) {
+          const methodList = Array.isArray(methods) ? methods : [methods];
+
+          for (const method of methodList) {
+            const methodLines = this.extractLines(method.lines);
+            const methodTotal = methodLines.length;
+            const methodCovered = methodLines.filter(l => parseInt(l['@_hits']) > 0).length;
+            const methodLineRate = parseFloat(method['@_line-rate'] ?? '0');
+
+            if (methodLines.length > 0) {
+              const lineNumbers = methodLines.map(l => parseInt(l['@_number']));
+              coveredSymbols.push({
+                filePath: filename,
+                name: `${cls['@_name']}::${method['@_name']}`,
+                type: 'method',
+                startLine: Math.min(...lineNumbers),
+                endLine: Math.max(...lineNumbers),
+                hitCount: methodCovered,
+                lineCoveragePct: methodLineRate * 100,
+              });
+            }
+
+            totalLines += methodTotal;
+            coveredLines += methodCovered;
+          }
+        }
+
+        // If no methods, count class lines directly
+        if (!methods || (Array.isArray(methods) ? methods.length === 0 : false)) {
+          totalLines += classTotal;
+          coveredLines += classCovered;
+        }
+
+        // Track file coverage
+        if (!fileCoverage.has(filename)) {
+          files.push(filename);
+          fileCoverage.set(filename, Math.round(lineRate * 100 * 100) / 100);
+        } else {
+          // Average the coverage if file appears multiple times
+          const existing = fileCoverage.get(filename)!;
+          fileCoverage.set(filename, (existing + lineRate * 100) / 2);
+        }
+      }
+    }
+
+    return { coveredFiles: files.sort(), fileCoverage, totalLines, coveredLines, coveredSymbols };
+  }
+
+  /**
+   * Extract lines array from potentially single or array value
+   */
+  private extractLines(linesData?: { line: CoberturaLine | CoberturaLine[] }): CoberturaLine[] {
+    if (!linesData?.line) {
+      return [];
+    }
+    return Array.isArray(linesData.line) ? linesData.line : [linesData.line];
+  }
+
+  private normalizePath(path: string): string {
+    return path.replace(/\\/g, '/');
+  }
+}
+
+/**
  * Get appropriate parser for a coverage file
  */
 export function getParserForFile(filePath: string, options?: {
   executable?: string;
+  coberturaOptions?: CoberturaParserOptions;
 }): CoverageParser | null {
   const ext = extname(filePath).toLowerCase();
   const name = basename(filePath).toLowerCase();
@@ -422,6 +762,11 @@ export function getParserForFile(filePath: string, options?: {
   // Coverlet JSON format (*.coverage.json)
   if (ext === '.json' && name.includes('.coverage')) {
     return new CSharpCoverageParser();
+  }
+
+  // Cobertura XML format (*.cobertura.xml or *.xml with cobertura in name)
+  if (ext === '.xml' && (name.includes('cobertura') || name.includes('coverage'))) {
+    return new CoberturaCoverageParser(options?.coberturaOptions);
   }
 
   return null;
