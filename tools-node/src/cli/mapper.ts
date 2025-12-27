@@ -12,7 +12,8 @@ import ora from 'ora';
 import * as fs from 'fs';
 import * as path from 'path';
 import { initDatabase } from '../database.js';
-import { CppCoverageParser, CSharpCoverageParser, LlvmJsonCoverageParser } from '../coverage-parser.js';
+import { CppCoverageParser, CSharpCoverageParser, LlvmJsonCoverageParser, CoberturaCoverageParser } from '../coverage-parser.js';
+import type { CoberturaParserOptions } from '../coverage-parser.js';
 import { GitUtils } from '../git-utils.js';
 
 const program = new Command();
@@ -59,6 +60,8 @@ program
   .option('--commit <hash>', 'Git commit hash to associate with this run')
   .option('-j, --concurrency <num>', 'Number of parallel workers for processing', '4')
   .option('-v, --verbose', 'Enable verbose output')
+  .option('--test-id-from-env <varName>', 'Read testId from environment variable (for Cobertura files)')
+  .option('--test-id-from-source', 'Read testId from <source> tag in Cobertura XML (for LuaUnit integration)')
   .action(async (options) => {
     const spinner = ora('Initializing...').start();
 
@@ -96,12 +99,19 @@ program
       const profrawFiles = await glob('*.profraw', { cwd: options.coverageDir });
       const llvmJsonFiles = await glob('*.cov.json', { cwd: options.coverageDir });  // Pre-processed LLVM JSON
       const coverletFiles = await glob('*.coverage.json', { cwd: options.coverageDir });
+      // Cobertura XML files: *.cobertura.xml or *coverage*.xml
+      const coberturaFiles = await glob('*.{cobertura.xml,coverage.xml}', { cwd: options.coverageDir });
+      // Also match files like coverage_TestName.xml
+      const coberturaXmlFiles = await glob('*coverage*.xml', { cwd: options.coverageDir });
+      // Merge and deduplicate Cobertura files
+      const allCoberturaFiles = [...new Set([...coberturaFiles, ...coberturaXmlFiles])];
 
       spinner.info(`Found ${profrawFiles.length} C++ profraw files`);
       spinner.info(`Found ${llvmJsonFiles.length} LLVM JSON files`);
       spinner.info(`Found ${coverletFiles.length} C# coverage files`);
+      spinner.info(`Found ${allCoberturaFiles.length} Cobertura XML files`);
 
-      if (profrawFiles.length === 0 && llvmJsonFiles.length === 0 && coverletFiles.length === 0) {
+      if (profrawFiles.length === 0 && llvmJsonFiles.length === 0 && coverletFiles.length === 0 && allCoberturaFiles.length === 0) {
         spinner.warn('No coverage files found.');
         db.close();
         return;
@@ -282,6 +292,74 @@ program
         }
 
         spinner.succeed(`Processed ${coverletFiles.length} C# coverage files`);
+      }
+
+      // Process Cobertura XML coverage files
+      if (allCoberturaFiles.length > 0) {
+        spinner.start('Processing Cobertura XML coverage files...');
+
+        // Build Cobertura parser options from CLI flags
+        const coberturaOptions: CoberturaParserOptions = {
+          testIdFromEnv: options.testIdFromEnv,
+          testIdFromSource: options.testIdFromSource,
+        };
+        const coberturaParser = new CoberturaCoverageParser(coberturaOptions);
+
+        for (let i = 0; i < allCoberturaFiles.length; i++) {
+          const file = allCoberturaFiles[i];
+          spinner.text = `Processing Cobertura [${i + 1}/${allCoberturaFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await coberturaParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            // File-level mappings
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              // Get coverage percentage for this file
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            // Symbol-level mappings (classes/methods)
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${allCoberturaFiles.length} Cobertura XML coverage files`);
       }
 
       // Record run metadata

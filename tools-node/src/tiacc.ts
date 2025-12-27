@@ -224,28 +224,33 @@ export class TiaCC {
         const testId = this.db.upsertTestScript(testName);
 
         // Process each covered source file
-        for (const sourceFile of coverageData.sourceFiles) {
-          const sourceId = this.db.upsertSourceFile(sourceFile.path);
+        const coveragePct = coverageData.totalLines > 0
+          ? (coverageData.coveredLines / coverageData.totalLines) * 100
+          : 0;
 
-          // Add file-level mapping
-          this.db.addCoverageMapping(sourceId, testId, sourceFile.lineCoverage || 0);
+        for (const sourcePath of coverageData.coveredFiles) {
+          const sourceId = this.db.upsertSourceFile(sourcePath);
+
+          // Add file-level mapping with coverage percentage
+          const fileCoveragePct = coverageData.fileCoverage?.get(sourcePath) ?? coveragePct;
+          this.db.addCoverageMapping(sourceId, testId, fileCoveragePct);
           mappingsCreated++;
+        }
 
-          // Extract and store symbols if using LLVM JSON format
-          if (parser instanceof LlvmJsonCoverageParser && sourceFile.functions) {
-            for (const func of sourceFile.functions) {
-              const symbolId = this.db.upsertSymbol(
-                sourceId,
-                func.name,
-                func.startLine,
-                func.endLine,
-                'function',
-                func.signature
-              );
+        // Process symbol-level coverage
+        if (coverageData.coveredSymbols && coverageData.coveredSymbols.length > 0) {
+          for (const sym of coverageData.coveredSymbols) {
+            const sourceId = this.db.upsertSourceFile(sym.filePath);
+            const symbolId = this.db.upsertSymbol(
+              sourceId,
+              sym.name,
+              sym.startLine,
+              sym.endLine,
+              sym.type
+            );
 
-              if (func.hitCount > 0) {
-                this.db.addSymbolCoverage(symbolId, testId, func.hitCount, func.lineCoverage || 0);
-              }
+            if (sym.hitCount > 0) {
+              this.db.addSymbolCoverage(symbolId, testId, sym.hitCount, sym.lineCoveragePct ?? 0);
             }
           }
         }
@@ -335,7 +340,9 @@ export class TiaCC {
         const symbols = this.db.getSymbolsForLines(filePath, lines);
         for (const symbol of symbols) {
           changedSymbols.push(`${symbol.name} (${basename(filePath)}:${symbol.startLine})`);
-          allSymbolIds.push(symbol.id);
+          if (symbol.id !== undefined) {
+            allSymbolIds.push(symbol.id);
+          }
         }
       }
 
