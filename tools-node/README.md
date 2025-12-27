@@ -1,9 +1,17 @@
-# TiaCC Tools (Node.js/TypeScript)
+# @tiacc/tools
 
-TiaCC 的核心 CLI 工具集，使用 TypeScript 构建，提供覆盖率处理、映射生成和测试推荐功能。
+> Smart test selection based on code coverage - Run only the tests affected by your changes
+
+[![npm version](https://img.shields.io/npm/v/@tiacc/tools.svg)](https://www.npmjs.com/package/@tiacc/tools)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+TiaCC 的核心工具集，使用 TypeScript 构建，提供覆盖率处理、映射生成和测试推荐功能。
+
+**将 30 分钟的 CI 测试缩短到 3-5 分钟！**
 
 ## 功能
 
+- **TiaCC 高层 API**: 简单易用的集成接口
 - **tia-mapper**: 处理覆盖率数据并构建源文件→测试的映射数据库
 - **tia-recommend**: 分析 Git 变更并推荐受影响的测试
 - **test-runner**: 内置测试运行器，支持覆盖率采集
@@ -11,8 +19,53 @@ TiaCC 的核心 CLI 工具集，使用 TypeScript 构建，提供覆盖率处理
 ## 安装
 
 ```bash
+# 全局安装（推荐用于 CLI）
+npm install -g @tiacc/tools
+
+# 或作为项目依赖
+npm install @tiacc/tools --save-dev
+```
+
+### 从源码安装
+
+```bash
+git clone https://github.com/your-org/TiaCC.git
+cd TiaCC/tools-node
 npm install
 npm run build
+npm link  # 创建全局命令
+```
+
+## 快速开始
+
+### 高层 API（推荐）
+
+```typescript
+import { TiaCC } from '@tiacc/tools';
+
+// 初始化
+const tia = await TiaCC.init('./impact_map.db');
+
+// 构建映射（在 Nightly CI 中执行）
+await tia.buildMapping('./coverage');
+
+// 获取受影响的测试（在 PR 检查中执行）
+const result = await tia.getAffectedTests({ baseBranch: 'origin/main' });
+
+console.log(`运行 ${result.tests.length} 个测试（节省 ${result.savingsPercent}%）`);
+for (const test of result.tests) {
+  console.log(`  - ${test}`);
+}
+```
+
+### CLI 快速使用
+
+```bash
+# 1. 构建映射数据库（在 Nightly CI 中执行）
+tia-mapper build --coverage-dir ./coverage --db impact_map.db
+
+# 2. 获取受影响的测试（在 PR 检查中执行）
+tia-recommend --db impact_map.db --branch origin/main
 ```
 
 ## CLI 命令

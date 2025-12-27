@@ -1,0 +1,24 @@
+{
+  "name": "tiacc-typescript-example",
+  "version": "1.0.0",
+  "description": "Example of programmatic TiaCC integration in TypeScript",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "tia:build": "tsx src/build-mapping.ts",
+    "tia:recommend": "tsx src/recommend-tests.ts"
+  },
+  "dependencies": {
+    "@tiacc/tools": "file:../../tools-node"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0",
+    "@vitest/coverage-v8": "^1.2.0"
+  }
+}

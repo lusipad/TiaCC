@@ -1,15 +1,30 @@
 {
   "name": "@tiacc/tools",
   "version": "1.0.0",
-  "description": "TiaCC Test Impact Analysis Tools",
+  "description": "TiaCC Test Impact Analysis Tools - Smart test selection based on code coverage",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli/*": {
+      "types": "./dist/cli/*.d.ts",
+      "import": "./dist/cli/*.js"
+    }
+  },
   "bin": {
     "tia-mapper": "dist/cli/mapper.js",
     "tia-recommend": "dist/cli/recommend.js",
     "tia-runner": "dist/test-runner.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -18,8 +33,34 @@
     "lint": "eslint src --ext .ts",
     "mapper": "tsx src/cli/mapper.ts",
     "recommend": "tsx src/cli/recommend.ts",
-    "runner": "tsx src/test-runner.ts"
+    "runner": "tsx src/test-runner.ts",
+    "prepublishOnly": "npm run build",
+    "postpublish": "echo 'Published successfully!'"
   },
+  "keywords": [
+    "test",
+    "testing",
+    "coverage",
+    "impact-analysis",
+    "ci",
+    "cd",
+    "optimization",
+    "llvm",
+    "coverlet",
+    "cpp",
+    "csharp",
+    "dotnet"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/TiaCC.git"
+  },
+  "homepage": "https://github.com/your-org/TiaCC#readme",
+  "bugs": {
+    "url": "https://github.com/your-org/TiaCC/issues"
+  },
+  "license": "MIT",
+  "author": "TiaCC Team",
   "dependencies": {
     "better-sqlite3": "^11.0.0",
     "commander": "^12.0.0",
@@ -36,5 +77,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
