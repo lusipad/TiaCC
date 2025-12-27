@@ -414,6 +414,12 @@ export function getParserForFile(filePath: string, options?: {
     return new CppCoverageParser(options);
   }
 
+  // LLVM pre-processed JSON format (*.cov.json)
+  if (name.endsWith('.cov.json')) {
+    return new LlvmJsonCoverageParser();
+  }
+
+  // Coverlet JSON format (*.coverage.json)
   if (ext === '.json' && name.includes('.coverage')) {
     return new CSharpCoverageParser();
   }
