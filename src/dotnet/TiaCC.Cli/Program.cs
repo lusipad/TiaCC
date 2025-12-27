@@ -1,10 +1,11 @@
 // TiaCC CLI - 零依赖单文件可执行程序
-// 内置 dotnet-coverage 调用，支持一键覆盖率收集和映射构建
+// 内置 dotnet-coverage 调用、HTTP 服务器、离线报告生成
 
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace TiaCC.Cli;
@@ -38,14 +39,16 @@ class Program
             "query" => RunQueryCommand(args[1..]),
             "stats" => RunStatsCommand(args[1..]),
             "recommend" => await RunRecommendCommand(args[1..]),
+            "serve" => await RunServeCommand(args[1..]),
+            "report" => RunReportCommand(args[1..]),
             _ => PrintUnknownCommand(args[0])
         };
     }
 
     static void PrintHelp()
     {
-        Console.WriteLine(@"
-TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
+        Console.WriteLine($@"
+TiaCC v{Version} - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
 
 用法:
   tiacc <command> [options]
@@ -56,6 +59,8 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
   query     查询覆盖指定源文件的测试
   stats     显示数据库统计信息
   recommend 基于 Git 变更推荐测试
+  serve     启动内置 Web 服务器查看 Dashboard (离线可用)
+  report    生成独立的 HTML 报告文件 (离线可用)
 
 示例:
   tiacc collect --command ""dotnet test""
@@ -63,6 +68,8 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
   tiacc build --coverage-dir ./coverage --db impact_map.json
   tiacc query --db impact_map.json --file src/Services/UserService.cs
   tiacc recommend --db impact_map.json --base-ref origin/main
+  tiacc serve --db impact_map.json --port 8080
+  tiacc report --db impact_map.json --output report.html
 
 选项:
   -h, --help      显示帮助信息
@@ -77,9 +84,8 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         return 1;
     }
 
-    /// <summary>
-    /// collect 命令 - 一键收集覆盖率并构建映射
-    /// </summary>
+    #region collect 命令
+
     static async Task<int> RunCollectCommand(string[] args)
     {
         var options = ParseCollectOptions(args);
@@ -96,7 +102,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         Console.WriteLine("╚════════════════════════════════════════════════════════════╝");
         Console.WriteLine();
 
-        // 步骤1: 检查 dotnet-coverage 是否可用
         Console.Write("🔍 检查 dotnet-coverage 工具...");
         if (!await CheckDotnetCoverageAvailable())
         {
@@ -108,11 +113,9 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         }
         Console.WriteLine(" ✓");
 
-        // 步骤2: 创建输出目录
         Directory.CreateDirectory(options.OutputDir);
         var coverageFile = Path.Combine(options.OutputDir, $"coverage_{DateTime.Now:yyyyMMdd_HHmmss}.cobertura.xml");
 
-        // 步骤3: 运行测试并收集覆盖率
         Console.WriteLine();
         Console.WriteLine($"📊 运行测试并收集覆盖率...");
         Console.WriteLine($"   命令: {options.Command}");
@@ -131,7 +134,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         Console.WriteLine();
         Console.WriteLine($"✓ 覆盖率收集完成 (耗时: {collectResult.DurationMs:F1}ms)");
 
-        // 步骤4: 解析覆盖率并构建映射
         Console.WriteLine();
         Console.WriteLine("📁 解析覆盖率数据并构建映射...");
 
@@ -143,7 +145,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
             return 1;
         }
 
-        // 步骤5: 显示统计
         Console.WriteLine();
         Console.WriteLine("═════════════════════════════════════════════════════════════");
         Console.WriteLine("✅ 构建完成!");
@@ -151,14 +152,19 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         Console.WriteLine($"   测试数:   {buildResult.Tests}");
         Console.WriteLine($"   映射数:   {buildResult.Mappings}");
         Console.WriteLine($"   数据库:   {options.DbPath}");
+        Console.WriteLine();
+        Console.WriteLine("💡 提示: 使用以下命令查看结果:");
+        Console.WriteLine($"   tiacc serve --db {options.DbPath}");
+        Console.WriteLine($"   tiacc report --db {options.DbPath} --output report.html");
         Console.WriteLine("═════════════════════════════════════════════════════════════");
 
         return 0;
     }
 
-    /// <summary>
-    /// build 命令 - 从已有覆盖率文件构建映射
-    /// </summary>
+    #endregion
+
+    #region build 命令
+
     static async Task<int> RunBuildCommand(string[] args)
     {
         var coverageDir = GetOption(args, "--coverage-dir", "-c") ?? "./coverage";
@@ -205,7 +211,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
                 totalMappings++;
             }
 
-            // 添加符号级映射
             foreach (var symbol in coverage.Symbols)
             {
                 db.AddSymbol(symbol.FilePath, symbol.Name, symbol.StartLine, symbol.EndLine, testName);
@@ -225,9 +230,10 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         return 0;
     }
 
-    /// <summary>
-    /// query 命令 - 查询覆盖指定源文件的测试
-    /// </summary>
+    #endregion
+
+    #region query 命令
+
     static int RunQueryCommand(string[] args)
     {
         var dbPath = GetOption(args, "--db", "-d") ?? "impact_map.json";
@@ -263,9 +269,10 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         return 0;
     }
 
-    /// <summary>
-    /// stats 命令 - 显示统计信息
-    /// </summary>
+    #endregion
+
+    #region stats 命令
+
     static int RunStatsCommand(string[] args)
     {
         var dbPath = GetOption(args, "--db", "-d") ?? "impact_map.json";
@@ -289,9 +296,10 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         return 0;
     }
 
-    /// <summary>
-    /// recommend 命令 - 基于 Git 变更推荐测试
-    /// </summary>
+    #endregion
+
+    #region recommend 命令
+
     static async Task<int> RunRecommendCommand(string[] args)
     {
         var dbPath = GetOption(args, "--db", "-d") ?? "impact_map.json";
@@ -305,8 +313,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         }
 
         var db = ImpactDatabase.Load(dbPath);
-
-        // 获取变更的文件
         var changedFiles = await GetGitChangedFiles(baseRef);
 
         if (changedFiles.Count == 0)
@@ -322,7 +328,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
             return 0;
         }
 
-        // 查找受影响的测试
         var affectedTests = new HashSet<string>();
         foreach (var file in changedFiles)
         {
@@ -376,11 +381,202 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         return 0;
     }
 
+    #endregion
+
+    #region serve 命令 - 内置 HTTP 服务器
+
+    static async Task<int> RunServeCommand(string[] args)
+    {
+        var dbPath = GetOption(args, "--db", "-d") ?? "impact_map.json";
+        var portStr = GetOption(args, "--port", "-p") ?? "8080";
+
+        if (!int.TryParse(portStr, out var port) || port < 1 || port > 65535)
+        {
+            Console.Error.WriteLine($"错误: 无效的端口号: {portStr}");
+            return 1;
+        }
+
+        if (!File.Exists(dbPath))
+        {
+            Console.Error.WriteLine($"错误: 数据库文件不存在: {dbPath}");
+            return 1;
+        }
+
+        var db = ImpactDatabase.Load(dbPath);
+
+        Console.WriteLine("╔════════════════════════════════════════════════════════════╗");
+        Console.WriteLine("║  TiaCC Dashboard - 内置 Web 服务器                         ║");
+        Console.WriteLine("╚════════════════════════════════════════════════════════════╝");
+        Console.WriteLine();
+        Console.WriteLine($"📊 数据库: {dbPath}");
+        Console.WriteLine($"🌐 服务器: http://localhost:{port}");
+        Console.WriteLine();
+        Console.WriteLine("按 Ctrl+C 停止服务器");
+        Console.WriteLine();
+
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://localhost:{port}/");
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+
+        try
+        {
+            listener.Start();
+        }
+        catch (HttpListenerException ex)
+        {
+            Console.Error.WriteLine($"无法启动服务器: {ex.Message}");
+            Console.Error.WriteLine($"请尝试其他端口: tiacc serve --port {port + 1}");
+            return 1;
+        }
+
+        // 自动打开浏览器
+        TryOpenBrowser($"http://localhost:{port}");
+
+        var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
+
+        try
+        {
+            while (!cts.Token.IsCancellationRequested)
+            {
+                var contextTask = listener.GetContextAsync();
+                var completedTask = await Task.WhenAny(contextTask, Task.Delay(-1, cts.Token));
+
+                if (completedTask != contextTask) break;
+
+                var context = await contextTask;
+                _ = Task.Run(() => HandleHttpRequest(context, db));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 正常退出
+        }
+
+        listener.Stop();
+        Console.WriteLine("\n服务器已停止");
+        return 0;
+    }
+
+    static void HandleHttpRequest(HttpListenerContext context, ImpactDatabase db)
+    {
+        var request = context.Request;
+        var response = context.Response;
+
+        try
+        {
+            var path = request.Url?.LocalPath ?? "/";
+            Console.WriteLine($"  {request.HttpMethod} {path}");
+
+            byte[] buffer;
+            string contentType;
+
+            switch (path)
+            {
+                case "/":
+                case "/index.html":
+                    buffer = Encoding.UTF8.GetBytes(EmbeddedDashboard.GetHtml(db));
+                    contentType = "text/html; charset=utf-8";
+                    break;
+
+                case "/api/stats":
+                    var stats = db.GetStats();
+                    buffer = JsonSerializer.SerializeToUtf8Bytes(stats);
+                    contentType = "application/json";
+                    break;
+
+                case "/api/mappings":
+                    buffer = JsonSerializer.SerializeToUtf8Bytes(db.GetAllMappings());
+                    contentType = "application/json";
+                    break;
+
+                case "/api/graph":
+                    buffer = JsonSerializer.SerializeToUtf8Bytes(db.GetGraphData());
+                    contentType = "application/json";
+                    break;
+
+                default:
+                    response.StatusCode = 404;
+                    buffer = Encoding.UTF8.GetBytes("Not Found");
+                    contentType = "text/plain";
+                    break;
+            }
+
+            response.ContentType = contentType;
+            response.ContentLength64 = buffer.Length;
+            response.OutputStream.Write(buffer, 0, buffer.Length);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"  错误: {ex.Message}");
+            response.StatusCode = 500;
+        }
+        finally
+        {
+            response.Close();
+        }
+    }
+
+    static void TryOpenBrowser(string url)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                Process.Start("open", url);
+            }
+            else if (OperatingSystem.IsLinux())
+            {
+                Process.Start("xdg-open", url);
+            }
+        }
+        catch
+        {
+            // 忽略打开浏览器失败
+        }
+    }
+
+    #endregion
+
+    #region report 命令 - 生成离线 HTML 报告
+
+    static int RunReportCommand(string[] args)
+    {
+        var dbPath = GetOption(args, "--db", "-d") ?? "impact_map.json";
+        var outputPath = GetOption(args, "--output", "-o") ?? "tiacc_report.html";
+
+        if (!File.Exists(dbPath))
+        {
+            Console.Error.WriteLine($"错误: 数据库文件不存在: {dbPath}");
+            return 1;
+        }
+
+        Console.WriteLine("📊 生成离线 HTML 报告...");
+
+        var db = ImpactDatabase.Load(dbPath);
+        var html = EmbeddedDashboard.GetHtml(db);
+
+        File.WriteAllText(outputPath, html, Encoding.UTF8);
+
+        Console.WriteLine($"✅ 报告已生成: {outputPath}");
+        Console.WriteLine();
+        Console.WriteLine("💡 提示: 可以直接用浏览器打开此文件，无需网络连接");
+
+        return 0;
+    }
+
+    #endregion
+
     #region dotnet-coverage 集成
 
-    /// <summary>
-    /// 检查 dotnet-coverage 工具是否可用
-    /// </summary>
     static async Task<bool> CheckDotnetCoverageAvailable()
     {
         try
@@ -407,9 +603,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         }
     }
 
-    /// <summary>
-    /// 运行 dotnet-coverage 收集覆盖率
-    /// </summary>
     static async Task<(bool Success, string? Error, double DurationMs)> RunDotnetCoverage(
         string command, string outputFile, bool verbose)
     {
@@ -417,7 +610,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
 
         try
         {
-            // dotnet-coverage collect --output <file> --output-format cobertura <command>
             var args = $"collect --output \"{outputFile}\" --output-format cobertura {command}";
 
             var psi = new ProcessStartInfo
@@ -441,7 +633,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
                 return (false, "无法启动 dotnet-coverage 进程", sw.ElapsedMilliseconds);
             }
 
-            // 实时输出
             var outputTask = Task.Run(async () =>
             {
                 while (!process.StandardOutput.EndOfStream)
@@ -498,9 +689,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
 
     #region 覆盖率解析
 
-    /// <summary>
-    /// 解析覆盖率文件
-    /// </summary>
     static async Task<CoverageData?> ParseCoverageFile(string filePath)
     {
         var extension = Path.GetExtension(filePath).ToLower();
@@ -513,9 +701,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         };
     }
 
-    /// <summary>
-    /// 解析 Cobertura XML 格式
-    /// </summary>
     static async Task<CoverageData?> ParseCoberturaXml(string filePath)
     {
         try
@@ -523,8 +708,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
             var content = await File.ReadAllTextAsync(filePath);
             var result = new CoverageData();
 
-            // 简单的 XML 解析（不使用 XmlDocument 以保持零依赖）
-            // 匹配 <class filename="...">
             var classRegex = new Regex(@"<class[^>]+filename=""([^""]+)""", RegexOptions.IgnoreCase);
             var classMatches = classRegex.Matches(content);
 
@@ -534,14 +717,12 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
                 result.CoveredFiles.Add(NormalizePath(filename));
             }
 
-            // 匹配 <method name="..." line-rate="...">
             var methodRegex = new Regex(
                 @"<method[^>]+name=""([^""]+)""[^>]*>[^<]*<lines>.*?</lines>.*?</method>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
             var lineRegex = new Regex(@"<line[^>]+number=""(\d+)""", RegexOptions.IgnoreCase);
 
-            // 从 package 和 class 标签获取文件路径
             var packageClassRegex = new Regex(
                 @"<class[^>]+name=""([^""]+)""[^>]+filename=""([^""]+)""[^>]*>.*?</class>",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
@@ -585,9 +766,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         }
     }
 
-    /// <summary>
-    /// 解析 JSON 格式覆盖率（Coverlet JSON）
-    /// </summary>
     static async Task<CoverageData?> ParseCoverageJson(string filePath)
     {
         try
@@ -598,7 +776,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
             using var doc = JsonDocument.Parse(content);
             var root = doc.RootElement;
 
-            // Coverlet JSON 格式: { "ModuleName": { "FilePath": { "ClassName.MethodName": { "Lines": {...} } } } }
             foreach (var module in root.EnumerateObject())
             {
                 foreach (var file in module.Value.EnumerateObject())
@@ -644,9 +821,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
 
     #region 映射构建
 
-    /// <summary>
-    /// 从覆盖率文件构建映射
-    /// </summary>
     static async Task<(bool Success, string? Error, int SourceFiles, int Tests, int Mappings)> BuildMappingFromCoverage(
         string coverageFile, string dbPath, bool verbose)
     {
@@ -675,7 +849,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
                 }
             }
 
-            // 添加符号映射
             foreach (var symbol in coverage.Symbols)
             {
                 db.AddSymbol(symbol.FilePath, symbol.Name, symbol.StartLine, symbol.EndLine, testName);
@@ -696,9 +869,6 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
 
     #region Git 集成
 
-    /// <summary>
-    /// 获取 Git 变更的文件
-    /// </summary>
     static async Task<List<string>> GetGitChangedFiles(string baseRef)
     {
         var result = new List<string>();
@@ -731,7 +901,7 @@ TiaCC - 测试影响分析工具 (Test Impact Analysis for Code Coverage)
         }
         catch
         {
-            // Git 不可用或不在 Git 仓库中
+            // Git 不可用
         }
 
         return result;
@@ -801,9 +971,6 @@ class CoveredSymbol
     public int EndLine { get; set; }
 }
 
-/// <summary>
-/// 简单的 JSON 文件数据库 - 零依赖实现
-/// </summary>
 class ImpactDatabase
 {
     public Dictionary<string, HashSet<string>> FileMappings { get; set; } = new();
@@ -905,6 +1072,78 @@ class ImpactDatabase
             LastUpdated = LastUpdated
         };
     }
+
+    public List<MappingEntry> GetAllMappings()
+    {
+        var result = new List<MappingEntry>();
+        foreach (var (file, tests) in FileMappings)
+        {
+            foreach (var test in tests)
+            {
+                result.Add(new MappingEntry { SourceFile = file, Test = test });
+            }
+        }
+        return result;
+    }
+
+    public GraphData GetGraphData()
+    {
+        var nodes = new List<GraphNode>();
+        var links = new List<GraphLink>();
+
+        var sourceIds = new Dictionary<string, int>();
+        var testIds = new Dictionary<string, int>();
+        var nodeId = 0;
+
+        // 添加源文件节点
+        foreach (var file in FileMappings.Keys)
+        {
+            sourceIds[file] = nodeId;
+            nodes.Add(new GraphNode
+            {
+                Id = nodeId++,
+                Label = Path.GetFileName(file),
+                FullPath = file,
+                Type = "source"
+            });
+        }
+
+        // 收集所有测试
+        var allTests = new HashSet<string>();
+        foreach (var tests in FileMappings.Values)
+        {
+            foreach (var test in tests)
+            {
+                allTests.Add(test);
+            }
+        }
+
+        // 添加测试节点
+        foreach (var test in allTests)
+        {
+            testIds[test] = nodeId;
+            nodes.Add(new GraphNode
+            {
+                Id = nodeId++,
+                Label = test,
+                FullPath = test,
+                Type = "test"
+            });
+        }
+
+        // 添加连接
+        foreach (var (file, tests) in FileMappings)
+        {
+            var sourceId = sourceIds[file];
+            foreach (var test in tests)
+            {
+                var testId = testIds[test];
+                links.Add(new GraphLink { Source = sourceId, Target = testId });
+            }
+        }
+
+        return new GraphData { Nodes = nodes, Links = links };
+    }
 }
 
 class SymbolInfo
@@ -923,6 +1162,478 @@ class DatabaseStats
     public int Mappings { get; set; }
     public int Symbols { get; set; }
     public DateTime LastUpdated { get; set; }
+}
+
+class MappingEntry
+{
+    public string SourceFile { get; set; } = "";
+    public string Test { get; set; } = "";
+}
+
+class GraphData
+{
+    public List<GraphNode> Nodes { get; set; } = new();
+    public List<GraphLink> Links { get; set; } = new();
+}
+
+class GraphNode
+{
+    public int Id { get; set; }
+    public string Label { get; set; } = "";
+    public string FullPath { get; set; } = "";
+    public string Type { get; set; } = "";
+}
+
+class GraphLink
+{
+    public int Source { get; set; }
+    public int Target { get; set; }
+}
+
+#endregion
+
+#region 内嵌 Dashboard - 完全离线可用
+
+/// <summary>
+/// 内嵌的 Dashboard HTML - 所有 CSS/JS 都内联，无外部依赖
+/// </summary>
+static class EmbeddedDashboard
+{
+    public static string GetHtml(ImpactDatabase db)
+    {
+        var stats = db.GetStats();
+        var mappings = db.GetAllMappings();
+        var graphData = db.GetGraphData();
+
+        var graphJson = JsonSerializer.Serialize(graphData);
+        var mappingsJson = JsonSerializer.Serialize(mappings);
+
+        return $@"<!DOCTYPE html>
+<html lang=""zh-CN"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <title>TiaCC Dashboard - 测试影响分析</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+
+        :root {{
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-purple: #8b5cf6;
+            --accent-pink: #ec4899;
+            --border-color: rgba(255,255,255,0.1);
+        }}
+
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }}
+
+        .header {{
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+
+        .header h1 {{
+            font-size: 1.5rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+
+        .header .info {{
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }}
+
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }}
+
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }}
+
+        .stat-card {{
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+        }}
+
+        .stat-card .value {{
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }}
+
+        .stat-card .label {{
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+
+        .stat-card:nth-child(1) .value {{ color: var(--accent-blue); }}
+        .stat-card:nth-child(2) .value {{ color: var(--accent-green); }}
+        .stat-card:nth-child(3) .value {{ color: var(--accent-purple); }}
+        .stat-card:nth-child(4) .value {{ color: var(--accent-pink); }}
+
+        .panel {{
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            overflow: hidden;
+        }}
+
+        .panel-header {{
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+        }}
+
+        .panel-body {{
+            padding: 1.5rem;
+        }}
+
+        .graph-container {{
+            height: 500px;
+            position: relative;
+        }}
+
+        #graph {{
+            width: 100%;
+            height: 100%;
+        }}
+
+        .node-source {{ fill: var(--accent-blue); }}
+        .node-test {{ fill: var(--accent-green); }}
+        .node {{ cursor: pointer; }}
+        .node:hover {{ filter: brightness(1.2); }}
+        .link {{ stroke: var(--text-secondary); stroke-opacity: 0.3; }}
+
+        .legend {{
+            display: flex;
+            gap: 2rem;
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }}
+
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }}
+
+        .legend-dot {{
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }}
+
+        .table-container {{
+            max-height: 400px;
+            overflow-y: auto;
+        }}
+
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+
+        th, td {{
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }}
+
+        th {{
+            background: var(--bg-card);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }}
+
+        tr:hover td {{
+            background: rgba(255,255,255,0.02);
+        }}
+
+        .search-box {{
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }}
+
+        .search-box:focus {{
+            outline: none;
+            border-color: var(--accent-blue);
+        }}
+
+        .tooltip {{
+            position: absolute;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 100;
+            max-width: 300px;
+            word-wrap: break-word;
+        }}
+
+        .file-path {{
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }}
+
+        @media (max-width: 768px) {{
+            .container {{ padding: 1rem; }}
+            .stats-grid {{ grid-template-columns: repeat(2, 1fr); }}
+            .stat-card .value {{ font-size: 1.75rem; }}
+        }}
+    </style>
+</head>
+<body>
+    <header class=""header"">
+        <h1>TiaCC Dashboard</h1>
+        <div class=""info"">最后更新: {stats.LastUpdated:yyyy-MM-dd HH:mm:ss}</div>
+    </header>
+
+    <main class=""container"">
+        <section class=""stats-grid"">
+            <div class=""stat-card"">
+                <div class=""value"">{stats.SourceFiles}</div>
+                <div class=""label"">源文件</div>
+            </div>
+            <div class=""stat-card"">
+                <div class=""value"">{stats.Tests}</div>
+                <div class=""label"">测试</div>
+            </div>
+            <div class=""stat-card"">
+                <div class=""value"">{stats.Mappings}</div>
+                <div class=""label"">映射关系</div>
+            </div>
+            <div class=""stat-card"">
+                <div class=""value"">{stats.Symbols}</div>
+                <div class=""label"">符号</div>
+            </div>
+        </section>
+
+        <section class=""panel"">
+            <div class=""panel-header"">依赖关系图</div>
+            <div class=""panel-body"">
+                <div class=""graph-container"">
+                    <svg id=""graph""></svg>
+                </div>
+            </div>
+            <div class=""legend"">
+                <div class=""legend-item"">
+                    <div class=""legend-dot"" style=""background: var(--accent-blue)""></div>
+                    <span>源文件</span>
+                </div>
+                <div class=""legend-item"">
+                    <div class=""legend-dot"" style=""background: var(--accent-green)""></div>
+                    <span>测试</span>
+                </div>
+            </div>
+        </section>
+
+        <section class=""panel"">
+            <div class=""panel-header"">映射列表</div>
+            <div class=""panel-body"">
+                <input type=""text"" class=""search-box"" id=""searchBox"" placeholder=""搜索文件或测试..."">
+                <div class=""table-container"">
+                    <table id=""mappingsTable"">
+                        <thead>
+                            <tr>
+                                <th>源文件</th>
+                                <th>测试</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class=""tooltip"" id=""tooltip"" style=""display: none""></div>
+
+    <script>
+        // 数据
+        const graphData = {graphJson};
+        const mappings = {mappingsJson};
+
+        // 初始化图形
+        function initGraph() {{
+            const container = document.querySelector('.graph-container');
+            const svg = document.getElementById('graph');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            svg.setAttribute('viewBox', `0 0 ${{width}} ${{height}}`);
+
+            if (graphData.Nodes.length === 0) {{
+                svg.innerHTML = '<text x=""50%"" y=""50%"" text-anchor=""middle"" fill=""#94a3b8"">暂无数据</text>';
+                return;
+            }}
+
+            // 简单的力导向布局
+            const nodes = graphData.Nodes.map((n, i) => ({{
+                ...n,
+                x: width / 2 + (Math.random() - 0.5) * width * 0.8,
+                y: height / 2 + (Math.random() - 0.5) * height * 0.8,
+                vx: 0,
+                vy: 0
+            }}));
+
+            const links = graphData.Links.map(l => ({{
+                source: nodes[l.Source],
+                target: nodes[l.Target]
+            }}));
+
+            // 简化的力模拟
+            for (let i = 0; i < 100; i++) {{
+                // 斥力
+                for (let a = 0; a < nodes.length; a++) {{
+                    for (let b = a + 1; b < nodes.length; b++) {{
+                        const dx = nodes[b].x - nodes[a].x;
+                        const dy = nodes[b].y - nodes[a].y;
+                        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+                        const force = 500 / (d * d);
+                        nodes[a].vx -= dx / d * force;
+                        nodes[a].vy -= dy / d * force;
+                        nodes[b].vx += dx / d * force;
+                        nodes[b].vy += dy / d * force;
+                    }}
+                }}
+
+                // 引力（连接）
+                for (const link of links) {{
+                    const dx = link.target.x - link.source.x;
+                    const dy = link.target.y - link.source.y;
+                    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const force = (d - 100) * 0.01;
+                    link.source.vx += dx / d * force;
+                    link.source.vy += dy / d * force;
+                    link.target.vx -= dx / d * force;
+                    link.target.vy -= dy / d * force;
+                }}
+
+                // 中心引力
+                for (const node of nodes) {{
+                    node.vx += (width / 2 - node.x) * 0.001;
+                    node.vy += (height / 2 - node.y) * 0.001;
+                }}
+
+                // 应用速度
+                for (const node of nodes) {{
+                    node.vx *= 0.9;
+                    node.vy *= 0.9;
+                    node.x += node.vx;
+                    node.y += node.vy;
+                    node.x = Math.max(20, Math.min(width - 20, node.x));
+                    node.y = Math.max(20, Math.min(height - 20, node.y));
+                }}
+            }}
+
+            // 绘制连接
+            let html = '';
+            for (const link of links) {{
+                html += `<line class=""link"" x1=""${{link.source.x}}"" y1=""${{link.source.y}}"" x2=""${{link.target.x}}"" y2=""${{link.target.y}}""/>`;
+            }}
+
+            // 绘制节点
+            for (const node of nodes) {{
+                const cls = node.Type === 'source' ? 'node-source' : 'node-test';
+                html += `<circle class=""node ${{cls}}"" cx=""${{node.x}}"" cy=""${{node.y}}"" r=""8"" data-label=""${{node.Label}}"" data-path=""${{node.FullPath}}""/>`;
+            }}
+
+            svg.innerHTML = html;
+
+            // 添加交互
+            const tooltip = document.getElementById('tooltip');
+            svg.querySelectorAll('.node').forEach(node => {{
+                node.addEventListener('mouseenter', e => {{
+                    tooltip.innerHTML = `<strong>${{e.target.dataset.label}}</strong><br><span class=""file-path"">${{e.target.dataset.path}}</span>`;
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = e.pageX + 10 + 'px';
+                    tooltip.style.top = e.pageY + 10 + 'px';
+                }});
+                node.addEventListener('mouseleave', () => {{
+                    tooltip.style.display = 'none';
+                }});
+            }});
+        }}
+
+        // 初始化表格
+        function initTable() {{
+            const tbody = document.querySelector('#mappingsTable tbody');
+            const searchBox = document.getElementById('searchBox');
+
+            function renderTable(filter = '') {{
+                const filtered = mappings.filter(m =>
+                    m.SourceFile.toLowerCase().includes(filter) ||
+                    m.Test.toLowerCase().includes(filter)
+                );
+
+                tbody.innerHTML = filtered.slice(0, 100).map(m => `
+                    <tr>
+                        <td class=""file-path"">${{m.SourceFile}}</td>
+                        <td>${{m.Test}}</td>
+                    </tr>
+                `).join('');
+
+                if (filtered.length > 100) {{
+                    tbody.innerHTML += `<tr><td colspan=""2"" style=""text-align:center;color:var(--text-secondary)"">... 还有 ${{filtered.length - 100}} 条记录</td></tr>`;
+                }}
+            }}
+
+            renderTable();
+
+            searchBox.addEventListener('input', e => {{
+                renderTable(e.target.value.toLowerCase());
+            }});
+        }}
+
+        // 初始化
+        initGraph();
+        initTable();
+
+        // 窗口调整时重绘
+        window.addEventListener('resize', initGraph);
+    </script>
+</body>
+</html>";
+    }
 }
 
 #endregion
