@@ -5,6 +5,34 @@
 import Database from 'better-sqlite3';
 import type { DbStats, SourceFile, TestScript, CoverageRun, Symbol, SymbolType, CoveredSymbol, FunctionTestMapping } from './types.js';
 
+// ============ Path Utilities ============
+
+/**
+ * Normalize file path for consistent storage and matching
+ */
+function normalizePath(filePath: string): string {
+  return filePath
+    .replace(/\\/g, '/')           // Convert backslashes to forward slashes
+    .replace(/\/+/g, '/')          // Remove duplicate slashes
+    .replace(/^\.\//, '');         // Remove leading ./
+}
+
+/**
+ * Extract file name from path
+ */
+function extractFileName(filePath: string): string {
+  return filePath.split(/[/\\]/).pop() ?? filePath;
+}
+
+/**
+ * Escape SQL LIKE special characters
+ */
+function escapeLikePattern(pattern: string): string {
+  return pattern
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_');
+}
+
 const SCHEMA_SQL = `
 -- Source files table
 CREATE TABLE IF NOT EXISTS source_files (
@@ -102,6 +130,32 @@ export class TiaDatabase {
    */
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * Execute a function within a transaction
+   * Automatically commits on success, rolls back on error
+   */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
+
+  /**
+   * Execute an async operation within a transaction
+   * Note: SQLite transactions are synchronous, so this wraps the sync transaction
+   */
+  async transactionAsync<T>(fn: () => Promise<T>): Promise<T> {
+    // For better-sqlite3, we need to handle async differently
+    // Start transaction manually
+    this.db.exec('BEGIN TRANSACTION');
+    try {
+      const result = await fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   // ============ Source File Operations ============
@@ -202,33 +256,50 @@ export class TiaDatabase {
    * Get all tests that cover a source file
    */
   getTestsForSource(filePath: string): string[] {
-    // Use LIKE for fuzzy matching to handle path differences
-    const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
+    // Normalize path and extract file name for fuzzy matching
+    const normalized = normalizePath(filePath);
+    const fileName = extractFileName(normalized);
+    const escapedFileName = escapeLikePattern(fileName);
 
     const stmt = this.db.prepare(`
       SELECT DISTINCT ts.script_path
       FROM coverage_map cm
       JOIN source_files sf ON cm.source_file_id = sf.id
       JOIN test_scripts ts ON cm.test_script_id = ts.id
-      WHERE sf.file_path LIKE ?
+      WHERE sf.file_path LIKE ? ESCAPE '\\'
     `);
 
-    const rows = stmt.all(`%${fileName}`) as { script_path: string }[];
+    const rows = stmt.all(`%${escapedFileName}`) as { script_path: string }[];
     return rows.map(r => r.script_path);
   }
 
   /**
    * Get all tests that cover any of the given source files
+   * Optimized to use a single query instead of N queries (N+1 problem fix)
    */
   getTestsForSources(filePaths: string[]): string[] {
-    const testsSet = new Set<string>();
+    if (filePaths.length === 0) return [];
 
-    for (const path of filePaths) {
-      const tests = this.getTestsForSource(path);
-      tests.forEach(t => testsSet.add(t));
-    }
+    // Normalize paths and extract file names for fuzzy matching
+    const fileNames = filePaths.map(p => {
+      const normalized = normalizePath(p);
+      return escapeLikePattern(extractFileName(normalized));
+    });
 
-    return Array.from(testsSet).sort();
+    // Build OR conditions for all files (batch query)
+    const conditions = fileNames.map(() => "sf.file_path LIKE ? ESCAPE '\\'").join(' OR ');
+
+    const stmt = this.db.prepare(`
+      SELECT DISTINCT ts.script_path
+      FROM coverage_map cm
+      JOIN source_files sf ON cm.source_file_id = sf.id
+      JOIN test_scripts ts ON cm.test_script_id = ts.id
+      WHERE ${conditions}
+    `);
+
+    const patterns = fileNames.map(f => `%${f}`);
+    const rows = stmt.all(...patterns) as { script_path: string }[];
+    return rows.map(r => r.script_path).sort();
   }
 
   // ============ Coverage Run Operations ============

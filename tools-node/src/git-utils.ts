@@ -4,6 +4,7 @@
 
 import simpleGit, { SimpleGit } from 'simple-git';
 import { existsSync } from 'fs';
+import { GitError } from './errors.js';
 
 export class GitUtils {
   private git: SimpleGit;
@@ -63,7 +64,11 @@ export class GitUtils {
         }
       }
     } catch (error) {
-      console.error(`Error getting git changes: ${error}`);
+      throw new GitError(
+        `Failed to get changed files: ${error instanceof Error ? error.message : String(error)}`,
+        'getChangedFiles',
+        error instanceof Error ? error : undefined
+      );
     }
 
     // Filter by extensions if specified
@@ -123,6 +128,81 @@ export class GitUtils {
   }
 
   /**
+   * Get renamed files between current state and a base reference
+   * Uses git diff -M (rename detection) to find file renames
+   * Returns a map of old path -> new path
+   */
+  async getRenamedFiles(options: {
+    baseRef?: string;
+    similarityThreshold?: number; // 0-100, default 50
+  } = {}): Promise<Map<string, string>> {
+    const { baseRef = 'HEAD~1', similarityThreshold = 50 } = options;
+    const renames = new Map<string, string>();
+
+    try {
+      // Use -M with threshold for rename detection
+      // --diff-filter=R shows only renamed files
+      // --name-status shows the status and names
+      const output = await this.git.raw([
+        'diff',
+        `--diff-filter=R`,
+        `-M${similarityThreshold}%`,
+        '--name-status',
+        baseRef,
+      ]);
+
+      const lines = output.trim().split('\n').filter(Boolean);
+
+      for (const line of lines) {
+        // Format: R<percentage>\t<old-path>\t<new-path>
+        const match = line.match(/^R\d*\t(.+)\t(.+)$/);
+        if (match) {
+          const [, oldPath, newPath] = match;
+          renames.set(oldPath, newPath);
+        }
+      }
+    } catch (error) {
+      throw new GitError(
+        `Failed to detect renamed files: ${error instanceof Error ? error.message : String(error)}`,
+        'getRenamedFiles',
+        error instanceof Error ? error : undefined
+      );
+    }
+
+    return renames;
+  }
+
+  /**
+   * Get changed files with rename information
+   * Returns both changed files and a map of old->new path for renames
+   */
+  async getChangedFilesWithRenames(options: {
+    baseRef?: string;
+    includeUntracked?: boolean;
+    extensions?: string[];
+  } = {}): Promise<{
+    changed: string[];
+    renamed: Map<string, string>;
+  }> {
+    const changed = await this.getChangedFiles(options);
+    const renamed = await this.getRenamedFiles({ baseRef: options.baseRef });
+
+    // Filter renamed map by extensions if specified
+    if (options.extensions && options.extensions.length > 0) {
+      const extSet = new Set(options.extensions.map(e => e.toLowerCase()));
+      for (const [oldPath, newPath] of renamed) {
+        const oldExt = '.' + oldPath.split('.').pop()?.toLowerCase();
+        const newExt = '.' + newPath.split('.').pop()?.toLowerCase();
+        if (!extSet.has(oldExt) && !extSet.has(newExt)) {
+          renamed.delete(oldPath);
+        }
+      }
+    }
+
+    return { changed, renamed };
+  }
+
+  /**
    * Get changed lines for each file (for function-level impact analysis)
    * Returns a map of file path -> array of changed line numbers
    */
@@ -176,7 +256,11 @@ export class GitUtils {
         }
       }
     } catch (error) {
-      console.error(`Error getting changed lines: ${error}`);
+      throw new GitError(
+        `Failed to get changed lines: ${error instanceof Error ? error.message : String(error)}`,
+        'getChangedLines',
+        error instanceof Error ? error : undefined
+      );
     }
 
     return result;

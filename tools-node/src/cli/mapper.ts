@@ -17,6 +17,33 @@ import { GitUtils } from '../git-utils.js';
 
 const program = new Command();
 
+/**
+ * Process items in parallel with concurrency limit
+ */
+async function parallelProcess<T, R>(
+  items: T[],
+  processor: (item: T, index: number) => Promise<R>,
+  concurrency: number
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let currentIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (currentIndex < items.length) {
+      const index = currentIndex++;
+      results[index] = await processor(items[index], index);
+    }
+  }
+
+  // Start workers up to concurrency limit
+  const workers = Array(Math.min(concurrency, items.length))
+    .fill(null)
+    .map(() => worker());
+
+  await Promise.all(workers);
+  return results;
+}
+
 program
   .name('tia-mapper')
   .description('TiaCC Mapping Generator - Build test impact maps from coverage data')
@@ -30,6 +57,7 @@ program
   .option('-e, --executable <path>', 'Path to instrumented executable (for C++ coverage)')
   .option('-b, --base-path <path>', 'Base path to strip from source file paths (for portable paths)')
   .option('--commit <hash>', 'Git commit hash to associate with this run')
+  .option('-j, --concurrency <num>', 'Number of parallel workers for processing', '4')
   .option('-v, --verbose', 'Enable verbose output')
   .action(async (options) => {
     const spinner = ora('Initializing...').start();
@@ -427,7 +455,14 @@ program
 
       // Build graph data for D3 force-directed graph
       spinner.text = 'Building graph data...';
-      const nodes: Array<{ id: string; type: 'source' | 'test' | 'function'; label: string; parent?: string }> = [];
+      const nodes: Array<{
+        id: string;
+        type: 'source' | 'test' | 'function';
+        label: string;
+        parent?: string;
+        startLine?: number;
+        endLine?: number;
+      }> = [];
       const links: Array<{ source: string; target: string; coverage: number }> = [];
 
       // Add source file nodes
@@ -475,20 +510,6 @@ program
             target: `test:${testId}`,
             coverage: m.lineCoveragePct,
           });
-        }
-      }
-
-      // Add function-level links (function -> test)
-      for (const sym of symbolMappings) {
-        for (const test of sym.tests) {
-          const testId = testIdMap.get(test.testPath);
-          if (testId !== undefined) {
-            links.push({
-              source: `func:${sym.symbolId}`,
-              target: `test:${testId}`,
-              coverage: test.coverage,
-            });
-          }
         }
       }
 
