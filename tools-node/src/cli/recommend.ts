@@ -14,16 +14,25 @@ import type { FunctionTestMapping } from '../types.js';
 
 const program = new Command();
 
+interface TestMethod {
+  className: string;
+  methodName: string;
+  fullPath: string;
+  coverage: number;
+}
+
 interface FunctionRecommendation {
   changedFunctions: Array<{
     name: string;
     file: string;
     lines: string;
     tests: Array<{ path: string; coverage: number }>;
+    testMethods: TestMethod[];  // Precise test method recommendations
   }>;
   summary: {
     functionsChanged: number;
     testsRecommended: number;
+    testMethodsRecommended: number;  // Count of unique test methods
     scale: 'small' | 'medium' | 'large';
     fallbackReason?: string;
   };
@@ -42,6 +51,8 @@ program
   .option('--level <level>', 'Analysis level: file or function', 'function')
   .option('--json', 'Output as JSON')
   .option('-q, --quiet', 'Only output test names, no headers')
+  .option('--methods', 'Output precise test methods (ClassName::methodName) instead of test scripts')
+  .option('--group-by-class', 'Group output by test class')
   .action(async (options) => {
     try {
       const git = new GitUtils();
@@ -172,11 +183,13 @@ async function runFunctionLevelAnalysis(
     summary: {
       functionsChanged: 0,
       testsRecommended: 0,
+      testMethodsRecommended: 0,
       scale: changeScale.scale,
     },
   };
 
   const allRecommendedTests = new Set<string>();
+  const allRecommendedMethods = new Map<string, TestMethod>();  // key: className::methodName
 
   // For each changed file, find affected symbols
   for (const [filePath, lines] of changedLines) {
@@ -190,6 +203,30 @@ async function runFunctionLevelAnalysis(
       const tests = db.getTestsForSymbols([symbol.id!]);
 
       if (tests.length > 0) {
+        const testMethods: TestMethod[] = [];
+
+        for (const t of tests) {
+          allRecommendedTests.add(t.testPath);
+
+          // Parse test path to extract class and method
+          const parsed = parseTestPath(t.testPath);
+          if (parsed) {
+            const methodKey = `${parsed.className}::${parsed.methodName}`;
+            if (!allRecommendedMethods.has(methodKey)) {
+              const method: TestMethod = {
+                className: parsed.className,
+                methodName: parsed.methodName,
+                fullPath: t.testPath,
+                coverage: t.coverage,
+              };
+              allRecommendedMethods.set(methodKey, method);
+              testMethods.push(method);
+            } else {
+              testMethods.push(allRecommendedMethods.get(methodKey)!);
+            }
+          }
+        }
+
         recommendation.changedFunctions.push({
           name: symbol.name,
           file: filePath,
@@ -198,11 +235,8 @@ async function runFunctionLevelAnalysis(
             path: t.testPath,
             coverage: t.coverage,
           })),
+          testMethods,
         });
-
-        for (const t of tests) {
-          allRecommendedTests.add(t.testPath);
-        }
       }
     }
 
@@ -211,22 +245,160 @@ async function runFunctionLevelAnalysis(
       const fileTests = db.getTestsForSource(filePath);
       for (const t of fileTests) {
         allRecommendedTests.add(t);
+
+        // Parse test path to extract class and method
+        const parsed = parseTestPath(t);
+        if (parsed) {
+          const methodKey = `${parsed.className}::${parsed.methodName}`;
+          if (!allRecommendedMethods.has(methodKey)) {
+            allRecommendedMethods.set(methodKey, {
+              className: parsed.className,
+              methodName: parsed.methodName,
+              fullPath: t,
+              coverage: 0,
+            });
+          }
+        }
       }
     }
   }
 
   recommendation.summary.functionsChanged = recommendation.changedFunctions.length;
   recommendation.summary.testsRecommended = allRecommendedTests.size;
+  recommendation.summary.testMethodsRecommended = allRecommendedMethods.size;
 
   // Output results
   if (options.json) {
     console.log(JSON.stringify(recommendation, null, 2));
+  } else if (options.methods) {
+    outputMethodResults(allRecommendedMethods, options);
   } else {
     outputFunctionResults(recommendation, options);
   }
 
-  const recommendedTests = Array.from(allRecommendedTests).sort();
-  writeOutputFile(options, recommendedTests);
+  // Write output file
+  if (options.methods) {
+    const methodNames = Array.from(allRecommendedMethods.keys()).sort();
+    writeOutputFile(options, methodNames);
+  } else {
+    const recommendedTests = Array.from(allRecommendedTests).sort();
+    writeOutputFile(options, recommendedTests);
+  }
+}
+
+/**
+ * Parse test path to extract class name and method name
+ * Supports formats:
+ * - ClassName::method_name
+ * - ClassName.method_name
+ * - Test_ClassName__test_methodName (from split command output)
+ * - test_method_name (no class)
+ */
+function parseTestPath(testPath: string): { className: string; methodName: string } | null {
+  // Try :: separator first (most common)
+  if (testPath.includes('::')) {
+    const parts = testPath.split('::');
+    return {
+      className: parts[0],
+      methodName: parts.slice(1).join('::'),
+    };
+  }
+
+  // Try Test_ClassName__test_methodName format
+  const testPattern = /^Test_([^_]+(?:_[^_]+)*)__(.+)$/;
+  const testMatch = testPath.match(testPattern);
+  if (testMatch) {
+    return {
+      className: testMatch[1],
+      methodName: testMatch[2],
+    };
+  }
+
+  // Try . separator (for Java/C# style)
+  if (testPath.includes('.')) {
+    const parts = testPath.split('.');
+    // Last part is method, rest is class
+    const methodName = parts.pop() || testPath;
+    const className = parts.join('.');
+    return {
+      className: className || 'Default',
+      methodName,
+    };
+  }
+
+  // No separator - treat as method name with default class
+  return {
+    className: 'Default',
+    methodName: testPath,
+  };
+}
+
+/**
+ * Output test methods grouped by class or as flat list
+ */
+function outputMethodResults(
+  methods: Map<string, TestMethod>,
+  options: any
+): void {
+  if (options.quiet) {
+    // Just output method names
+    for (const key of Array.from(methods.keys()).sort()) {
+      console.log(key);
+    }
+    return;
+  }
+
+  if (methods.size === 0) {
+    console.log('No test methods found for changed code.');
+    return;
+  }
+
+  if (options.groupByClass) {
+    // Group by class
+    const byClass = new Map<string, TestMethod[]>();
+    for (const method of methods.values()) {
+      if (!byClass.has(method.className)) {
+        byClass.set(method.className, []);
+      }
+      byClass.get(method.className)!.push(method);
+    }
+
+    console.log('Recommended Test Methods (by class):');
+    const sortedClasses = Array.from(byClass.keys()).sort();
+
+    for (let i = 0; i < sortedClasses.length; i++) {
+      const className = sortedClasses[i];
+      const classMethods = byClass.get(className)!;
+      const isLast = i === sortedClasses.length - 1;
+      const prefix = isLast ? '└─' : '├─';
+
+      console.log(`  ${prefix} ${className} (${classMethods.length} methods)`);
+
+      for (let j = 0; j < classMethods.length; j++) {
+        const method = classMethods[j];
+        const methodIsLast = j === classMethods.length - 1;
+        const methodPrefix = methodIsLast ? '└─' : '├─';
+        const indentPrefix = isLast ? '   ' : '│  ';
+        const coverageStr = method.coverage > 0 ? ` (${method.coverage.toFixed(1)}%)` : '';
+        console.log(`  ${indentPrefix}  ${methodPrefix} ${method.methodName}${coverageStr}`);
+      }
+    }
+  } else {
+    // Flat list
+    console.log('Recommended Test Methods:');
+    const sortedMethods = Array.from(methods.values()).sort((a, b) =>
+      `${a.className}::${a.methodName}`.localeCompare(`${b.className}::${b.methodName}`)
+    );
+
+    for (const method of sortedMethods) {
+      const coverageStr = method.coverage > 0 ? ` (${method.coverage.toFixed(1)}%)` : '';
+      console.log(`  - ${method.className}::${method.methodName}${coverageStr}`);
+    }
+  }
+
+  console.log();
+  console.log('='.repeat(60));
+  console.log(`Summary: ${methods.size} unique test methods recommended`);
 }
 
 /**

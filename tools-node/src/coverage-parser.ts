@@ -484,6 +484,12 @@ export interface CoberturaParserOptions {
   testIdFromSource?: boolean;
 
   /**
+   * Parse testId from filename format: Test_ClassName__test_methodName.cobertura.xml
+   * This extracts "ClassName::test_methodName" as the testId.
+   */
+  testIdFromFilename?: boolean;
+
+  /**
    * Custom testId to use instead of deriving from filename.
    */
   testId?: string;
@@ -580,8 +586,48 @@ export class CoberturaCoverageParser extends CoverageParser {
       console.warn(`No valid <source> tag found, falling back to filename`);
     }
 
-    // Priority 4: Fallback to filename
+    // Priority 4: Parse from filename format Test_ClassName__test_methodName.cobertura.xml
+    if (this.options.testIdFromFilename) {
+      const testId = this.extractTestIdFromFilename(coverageFile);
+      if (testId) {
+        return testId;
+      }
+      console.warn(`Could not parse testId from filename, falling back to default`);
+    }
+
+    // Priority 5: Fallback to filename
     return basename(coverageFile).replace(/\.(cobertura\.)?xml$/i, '');
+  }
+
+  /**
+   * Extract testId from filename format: Test_ClassName__test_methodName.cobertura.xml
+   * Returns "ClassName::test_methodName" format
+   */
+  private extractTestIdFromFilename(coverageFile: string): string | null {
+    const filename = basename(coverageFile);
+
+    // Match pattern: Test_ClassName__test_methodName.cobertura.xml
+    // or: Test_ClassName__test_methodName.xml
+    const pattern = /^Test_([^_]+(?:_[^_]+)*)__(.+?)(?:\.cobertura)?\.xml$/i;
+    const match = filename.match(pattern);
+
+    if (match) {
+      const className = match[1].replace(/_/g, '.');  // Convert underscores back to dots if needed
+      const methodName = match[2];
+      return `${className}::${methodName}`;
+    }
+
+    // Alternative pattern without Test_ prefix: ClassName__methodName.cobertura.xml
+    const altPattern = /^([^_]+(?:_[^_]+)*)__(.+?)(?:\.cobertura)?\.xml$/i;
+    const altMatch = filename.match(altPattern);
+
+    if (altMatch) {
+      const className = altMatch[1];
+      const methodName = altMatch[2];
+      return `${className}::${methodName}`;
+    }
+
+    return null;
   }
 
   /**

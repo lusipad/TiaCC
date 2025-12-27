@@ -457,6 +457,14 @@
                             </path>
                         </svg>
                     </button>
+                    <button onclick="setVizMode('testcases')" id="btn-mode-testcases"
+                        class="p-2 rounded hover:bg-white/10 text-slate-400" title="Test Cases View">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4">
+                            </path>
+                        </svg>
+                    </button>
                 </div>
             </div>
 
@@ -466,7 +474,59 @@
                     <div id="graph-container" class="w-full h-full">
                         <svg id="force-graph" class="w-full h-full"></svg>
                     </div>
-                    </section>
+                </div>
+                <div id="heatmap-view" class="hidden w-full h-full"></div>
+                <!-- Test Cases View -->
+                <div id="testcases-view" class="hidden w-full h-full overflow-auto p-6">
+                    <div class="max-w-6xl mx-auto">
+                        <!-- Header -->
+                        <div class="mb-6">
+                            <h2 class="text-xl font-semibold text-slate-100 mb-2">Test Cases Overview</h2>
+                            <p class="text-sm text-slate-400">View test methods grouped by class with coverage metrics</p>
+                        </div>
+
+                        <!-- Stats Cards -->
+                        <div class="grid grid-cols-4 gap-4 mb-6">
+                            <div class="glass-panel rounded-xl p-4">
+                                <div class="text-2xl font-bold text-emerald-400" id="tc-stat-classes">0</div>
+                                <div class="text-xs text-slate-500">Test Classes</div>
+                            </div>
+                            <div class="glass-panel rounded-xl p-4">
+                                <div class="text-2xl font-bold text-indigo-400" id="tc-stat-methods">0</div>
+                                <div class="text-xs text-slate-500">Test Methods</div>
+                            </div>
+                            <div class="glass-panel rounded-xl p-4">
+                                <div class="text-2xl font-bold text-purple-400" id="tc-stat-coverage">-</div>
+                                <div class="text-xs text-slate-500">Avg Coverage</div>
+                            </div>
+                            <div class="glass-panel rounded-xl p-4">
+                                <div class="text-2xl font-bold text-amber-400" id="tc-stat-sources">0</div>
+                                <div class="text-xs text-slate-500">Sources Covered</div>
+                            </div>
+                        </div>
+
+                        <!-- Search & Filter -->
+                        <div class="flex gap-4 mb-6">
+                            <div class="flex-1">
+                                <input type="text" id="tc-search" placeholder="Search test classes or methods..."
+                                    class="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-300 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                    oninput="filterTestCases()">
+                            </div>
+                            <select id="tc-sort" onchange="updateTestCasesView()"
+                                class="bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-300 focus:ring-1 focus:ring-indigo-500">
+                                <option value="name">Sort by Name</option>
+                                <option value="methods">Sort by Method Count</option>
+                                <option value="coverage">Sort by Coverage</option>
+                            </select>
+                        </div>
+
+                        <!-- Test Classes Grid -->
+                        <div id="tc-classes-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Test class cards will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
 
         <!-- Detail Panel (Function-level info) -->
@@ -966,18 +1026,30 @@
                     ? 'p-2 rounded hover:bg-white/10 text-indigo-400 bg-white/10'
                     : 'p-2 rounded hover:bg-white/10 text-slate-400';
 
+                document.getElementById('btn-mode-testcases').className = mode === 'testcases'
+                    ? 'p-2 rounded hover:bg-white/10 text-indigo-400 bg-white/10'
+                    : 'p-2 rounded hover:bg-white/10 text-slate-400';
+
                 // Toggle Views
+                document.getElementById('graph-view').classList.add('hidden');
+                document.getElementById('heatmap-view').classList.add('hidden');
+                document.getElementById('testcases-view').classList.add('hidden');
+
                 if (mode === 'graph') {
                     document.getElementById('graph-view').classList.remove('hidden');
-                    document.getElementById('heatmap-view').classList.add('hidden');
                     // Ensure layout update
                     setTimeout(updateGraph, 50);
-                } else {
-                    document.getElementById('graph-view').classList.add('hidden');
+                } else if (mode === 'heatmap') {
                     document.getElementById('heatmap-view').classList.remove('hidden');
                     if (!window.heatmapInitialized) {
                         updateTreemap();
                         window.heatmapInitialized = true;
+                    }
+                } else if (mode === 'testcases') {
+                    document.getElementById('testcases-view').classList.remove('hidden');
+                    if (!window.testcasesInitialized) {
+                        updateTestCasesView();
+                        window.testcasesInitialized = true;
                     }
                 }
             }
@@ -2105,6 +2177,226 @@
             }
             function hideTooltip() {
                 if (tooltip) tooltip.transition().duration(200).style('opacity', 0);
+            }
+
+            // ============ Test Cases View ============
+            function updateTestCasesView() {
+                const { testScripts, symbols } = appData;
+                const container = document.getElementById('tc-classes-container');
+                if (!container) return;
+
+                // Parse test scripts into classes and methods
+                const testClasses = new Map();  // className -> { methods: [], totalCoverage, sourcesCount }
+
+                // Get sort option
+                const sortBy = document.getElementById('tc-sort')?.value || 'name';
+
+                // Parse test scripts (format: ClassName::methodName or Test_ClassName__methodName)
+                for (const testPath of testScripts) {
+                    let className, methodName;
+
+                    // Try ClassName::methodName format
+                    if (testPath.includes('::')) {
+                        const parts = testPath.split('::');
+                        className = parts[0];
+                        methodName = parts.slice(1).join('::');
+                    }
+                    // Try Test_ClassName__methodName format
+                    else if (testPath.match(/^Test_(.+)__(.+)$/)) {
+                        const match = testPath.match(/^Test_(.+)__(.+)$/);
+                        className = match[1];
+                        methodName = match[2];
+                    }
+                    // Fallback: use as method name with Default class
+                    else {
+                        className = 'Default';
+                        methodName = testPath;
+                    }
+
+                    if (!testClasses.has(className)) {
+                        testClasses.set(className, {
+                            methods: [],
+                            totalCoverage: 0,
+                            coverageCount: 0,
+                            sourcesSet: new Set()
+                        });
+                    }
+
+                    // Get coverage info from symbols
+                    const symbolsArray = symbols?.symbols || [];
+                    let methodCoverage = 0;
+                    let sourcesForMethod = [];
+
+                    for (const sym of symbolsArray) {
+                        if (sym.tests) {
+                            for (const test of sym.tests) {
+                                if (test.testPath === testPath ||
+                                    test.testPath.includes(methodName)) {
+                                    methodCoverage = Math.max(methodCoverage, test.coverage || 0);
+                                    sourcesForMethod.push(sym.sourceFile);
+                                    testClasses.get(className).sourcesSet.add(sym.sourceFile);
+                                }
+                            }
+                        }
+                    }
+
+                    testClasses.get(className).methods.push({
+                        name: methodName,
+                        fullPath: testPath,
+                        coverage: methodCoverage,
+                        sources: sourcesForMethod
+                    });
+
+                    if (methodCoverage > 0) {
+                        testClasses.get(className).totalCoverage += methodCoverage;
+                        testClasses.get(className).coverageCount++;
+                    }
+                }
+
+                // Calculate stats
+                let totalMethods = 0;
+                let totalCoverage = 0;
+                let coverageCount = 0;
+                const allSources = new Set();
+
+                for (const [, classData] of testClasses) {
+                    totalMethods += classData.methods.length;
+                    totalCoverage += classData.totalCoverage;
+                    coverageCount += classData.coverageCount;
+                    classData.sourcesSet.forEach(s => allSources.add(s));
+                }
+
+                // Update stats
+                document.getElementById('tc-stat-classes').textContent = testClasses.size;
+                document.getElementById('tc-stat-methods').textContent = totalMethods;
+                document.getElementById('tc-stat-coverage').textContent =
+                    coverageCount > 0 ? (totalCoverage / coverageCount).toFixed(1) + '%' : '-';
+                document.getElementById('tc-stat-sources').textContent = allSources.size;
+
+                // Sort classes
+                let sortedClasses = Array.from(testClasses.entries());
+                if (sortBy === 'name') {
+                    sortedClasses.sort((a, b) => a[0].localeCompare(b[0]));
+                } else if (sortBy === 'methods') {
+                    sortedClasses.sort((a, b) => b[1].methods.length - a[1].methods.length);
+                } else if (sortBy === 'coverage') {
+                    sortedClasses.sort((a, b) => {
+                        const avgA = a[1].coverageCount > 0 ? a[1].totalCoverage / a[1].coverageCount : 0;
+                        const avgB = b[1].coverageCount > 0 ? b[1].totalCoverage / b[1].coverageCount : 0;
+                        return avgB - avgA;
+                    });
+                }
+
+                // Render test class cards
+                container.innerHTML = sortedClasses.map(([className, classData]) => {
+                    const avgCoverage = classData.coverageCount > 0
+                        ? (classData.totalCoverage / classData.coverageCount).toFixed(1)
+                        : null;
+
+                    const covClass = avgCoverage === null ? 'text-slate-500' :
+                        avgCoverage >= 80 ? 'text-emerald-400' : avgCoverage >= 50 ? 'text-amber-400' : 'text-red-400';
+
+                    const covBgClass = avgCoverage === null ? 'bg-slate-700' :
+                        avgCoverage >= 80 ? 'bg-emerald-500/20' : avgCoverage >= 50 ? 'bg-amber-500/20' : 'bg-red-500/20';
+
+                    // Sort methods by coverage
+                    const sortedMethods = [...classData.methods].sort((a, b) => b.coverage - a.coverage);
+
+                    return `
+                        <div class="glass-panel rounded-xl overflow-hidden test-class-card" data-classname="${className}">
+                            <!-- Class Header -->
+                            <div class="p-4 border-b border-white/5 ${covBgClass}">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                                            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10">
+                                                </path>
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-semibold text-slate-100">${className}</h3>
+                                            <p class="text-xs text-slate-500">${classData.methods.length} methods · ${classData.sourcesSet.size} sources</p>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-lg font-bold ${covClass}">${avgCoverage !== null ? avgCoverage + '%' : '-'}</div>
+                                        <div class="text-[10px] text-slate-500">avg coverage</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Methods List -->
+                            <div class="p-3 max-h-64 overflow-y-auto custom-scrollbar">
+                                ${sortedMethods.map(method => {
+                                    const methodCovClass = method.coverage === 0 ? 'text-slate-500' :
+                                        method.coverage >= 80 ? 'text-emerald-400' :
+                                        method.coverage >= 50 ? 'text-amber-400' : 'text-red-400';
+
+                                    const barWidth = Math.min(100, method.coverage);
+                                    const barColor = method.coverage === 0 ? 'bg-slate-700' :
+                                        method.coverage >= 80 ? 'bg-emerald-500' :
+                                        method.coverage >= 50 ? 'bg-amber-500' : 'bg-red-500';
+
+                                    return `
+                                        <div class="group p-2 rounded-lg hover:bg-white/5 transition test-method-item" data-methodname="${method.name}">
+                                            <div class="flex items-center justify-between mb-1">
+                                                <span class="text-sm text-slate-300 group-hover:text-white truncate flex-1" title="${method.fullPath}">
+                                                    ${method.name}
+                                                </span>
+                                                <span class="text-xs font-mono ${methodCovClass}">${method.coverage > 0 ? method.coverage.toFixed(1) + '%' : '-'}</span>
+                                            </div>
+                                            <div class="h-1 bg-slate-800 rounded-full overflow-hidden">
+                                                <div class="h-full ${barColor} transition-all" style="width: ${barWidth}%"></div>
+                                            </div>
+                                            ${method.sources.length > 0 ? `
+                                                <div class="mt-1 text-[10px] text-slate-600">
+                                                    ${method.sources.slice(0, 3).map(s => s.split('/').pop()).join(', ')}
+                                                    ${method.sources.length > 3 ? ` +${method.sources.length - 3} more` : ''}
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                if (sortedClasses.length === 0) {
+                    container.innerHTML = `
+                        <div class="col-span-2 text-center py-12 text-slate-500">
+                            <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                            </svg>
+                            <p>No test cases found.</p>
+                            <p class="text-sm mt-2 opacity-75">Run tia-mapper build to collect test data.</p>
+                        </div>
+                    `;
+                }
+            }
+
+            function filterTestCases() {
+                const searchInput = document.getElementById('tc-search');
+                const filter = (searchInput?.value || '').toLowerCase();
+                const cards = document.querySelectorAll('.test-class-card');
+
+                cards.forEach(card => {
+                    const className = (card.dataset.classname || '').toLowerCase();
+                    const methods = card.querySelectorAll('.test-method-item');
+                    let hasVisibleMethods = false;
+
+                    methods.forEach(method => {
+                        const methodName = (method.dataset.methodname || '').toLowerCase();
+                        const match = methodName.includes(filter) || className.includes(filter);
+                        method.style.display = match ? '' : 'none';
+                        if (match) hasVisibleMethods = true;
+                    });
+
+                    // Show card if class name matches or has visible methods
+                    card.style.display = (className.includes(filter) || hasVisibleMethods) ? '' : 'none';
+                });
             }
 
             // ============ Heatmap ============

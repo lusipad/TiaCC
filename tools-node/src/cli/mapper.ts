@@ -62,6 +62,7 @@ program
   .option('-v, --verbose', 'Enable verbose output')
   .option('--test-id-from-env <varName>', 'Read testId from environment variable (for Cobertura files)')
   .option('--test-id-from-source', 'Read testId from <source> tag in Cobertura XML (for LuaUnit integration)')
+  .option('--test-id-from-filename', 'Parse testId from filename format: Test_ClassName__test_methodName.cobertura.xml')
   .action(async (options) => {
     const spinner = ora('Initializing...').start();
 
@@ -302,6 +303,7 @@ program
         const coberturaOptions: CoberturaParserOptions = {
           testIdFromEnv: options.testIdFromEnv,
           testIdFromSource: options.testIdFromSource,
+          testIdFromFilename: options.testIdFromFilename,
         };
         const coberturaParser = new CoberturaCoverageParser(coberturaOptions);
 
