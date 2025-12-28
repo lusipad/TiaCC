@@ -210,3 +210,267 @@ describe('Database edge cases', () => {
     expect(id).toBeGreaterThan(0);
   });
 });
+
+describe('Symbol operations', () => {
+  let tempDir: string;
+  let dbPath: string;
+  let db: TiaDatabase;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tiacc-test-'));
+    dbPath = join(tempDir, 'test.db');
+    db = initDatabase(dbPath);
+  });
+
+  afterEach(() => {
+    db.close();
+    if (existsSync(dbPath)) {
+      unlinkSync(dbPath);
+    }
+    rmdirSync(tempDir);
+  });
+
+  it('should insert a new symbol', () => {
+    const sourceId = db.upsertSourceFile('src/main.cpp');
+    const symbolId = db.upsertSymbol(sourceId, 'main', 10, 20, 'function');
+
+    expect(symbolId).toBeGreaterThan(0);
+  });
+
+  it('should update existing symbol', () => {
+    const sourceId = db.upsertSourceFile('src/main.cpp');
+    const id1 = db.upsertSymbol(sourceId, 'main', 10, 20, 'function');
+    const id2 = db.upsertSymbol(sourceId, 'main', 10, 25, 'function'); // Different end line
+
+    expect(id1).toBe(id2);
+  });
+
+  it('should add symbol coverage', () => {
+    const sourceId = db.upsertSourceFile('src/main.cpp');
+    const testId = db.upsertTestScript('tests/test_main.lua');
+    const symbolId = db.upsertSymbol(sourceId, 'calculate', 15, 30, 'function');
+
+    db.addSymbolCoverage(symbolId, testId, 5, 100);
+
+    const stats = db.getSymbolStats();
+    expect(stats.symbolMappings).toBe(1);
+  });
+
+  it('should get symbols for changed lines', () => {
+    const sourceId = db.upsertSourceFile('src/engine.cpp');
+    db.upsertSymbol(sourceId, 'init', 1, 10, 'function');
+    db.upsertSymbol(sourceId, 'update', 15, 30, 'function');
+    db.upsertSymbol(sourceId, 'render', 35, 50, 'function');
+
+    const symbols = db.getSymbolsForLines('engine.cpp', [20, 25]); // Lines in update function
+
+    expect(symbols).toHaveLength(1);
+    expect(symbols[0].name).toBe('update');
+  });
+
+  it('should get tests for symbols', () => {
+    const sourceId = db.upsertSourceFile('src/utils.cpp');
+    const symbolId = db.upsertSymbol(sourceId, 'helper', 5, 15, 'function');
+    const test1Id = db.upsertTestScript('tests/test_a.lua');
+    const test2Id = db.upsertTestScript('tests/test_b.lua');
+
+    db.addSymbolCoverage(symbolId, test1Id, 10, 100);
+    db.addSymbolCoverage(symbolId, test2Id, 5, 80);
+
+    const tests = db.getTestsForSymbols([symbolId]);
+
+    expect(tests).toHaveLength(2);
+    expect(tests.some(t => t.testPath === 'tests/test_a.lua')).toBe(true);
+    expect(tests.some(t => t.testPath === 'tests/test_b.lua')).toBe(true);
+  });
+
+  it('should batch insert symbols', () => {
+    const sourceId = db.upsertSourceFile('src/app.cpp');
+    const symbols = [
+      { sourceFileId: sourceId, name: 'func1', type: 'function' as const, startLine: 1, endLine: 10 },
+      { sourceFileId: sourceId, name: 'func2', type: 'function' as const, startLine: 15, endLine: 25 },
+      { sourceFileId: sourceId, name: 'func3', type: 'function' as const, startLine: 30, endLine: 40 },
+    ];
+
+    const ids = db.batchInsertSymbols(symbols);
+
+    expect(ids).toHaveLength(3);
+    expect(db.getSymbolStats().symbols).toBe(3);
+  });
+});
+
+describe('Smart recommendation operations', () => {
+  let tempDir: string;
+  let dbPath: string;
+  let db: TiaDatabase;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tiacc-test-'));
+    dbPath = join(tempDir, 'test.db');
+    db = initDatabase(dbPath);
+  });
+
+  afterEach(() => {
+    db.close();
+    if (existsSync(dbPath)) {
+      unlinkSync(dbPath);
+    }
+    rmdirSync(tempDir);
+  });
+
+  it('should record test result', () => {
+    db.recordTestResult('tests/test.lua', true, 1000);
+
+    const stats = db.getTestStats('tests/test.lua');
+    expect(stats).not.toBeNull();
+    expect(stats!.totalRuns).toBe(1);
+    expect(stats!.totalPasses).toBe(1);
+  });
+
+  it('should track failure streak', () => {
+    db.recordTestResult('tests/test.lua', false);
+    db.recordTestResult('tests/test.lua', false);
+    db.recordTestResult('tests/test.lua', false);
+
+    const stats = db.getTestStats('tests/test.lua');
+    expect(stats).not.toBeNull();
+    expect(stats!.failureStreak).toBe(3);
+  });
+
+  it('should reset failure streak on success', () => {
+    db.recordTestResult('tests/test.lua', false);
+    db.recordTestResult('tests/test.lua', false);
+    db.recordTestResult('tests/test.lua', true);
+
+    const stats = db.getTestStats('tests/test.lua');
+    expect(stats).not.toBeNull();
+    expect(stats!.failureStreak).toBe(0);
+  });
+
+  it('should calculate failure probability', () => {
+    const sourceId = db.upsertSourceFile('src/main.cpp');
+    const testId = db.upsertTestScript('tests/test.lua');
+    db.addCoverageMapping(sourceId, testId);
+
+    // Record failures when file changes
+    db.recordTestResult('tests/test.lua', false, undefined, 'abc', ['src/main.cpp']);
+    db.recordTestResult('tests/test.lua', false, undefined, 'def', ['src/main.cpp']);
+    db.recordTestResult('tests/test.lua', true, undefined, 'ghi', ['src/main.cpp']);
+
+    const probability = db.getFailureProbability('tests/test.lua', ['src/main.cpp']);
+    expect(probability).toBeGreaterThan(0);
+  });
+
+  it('should get smart recommendations', () => {
+    const source1Id = db.upsertSourceFile('src/main.cpp');
+    const source2Id = db.upsertSourceFile('src/utils.cpp');
+    const test1Id = db.upsertTestScript('tests/test_main.lua');
+    const test2Id = db.upsertTestScript('tests/test_utils.lua');
+
+    db.addCoverageMapping(source1Id, test1Id);
+    db.addCoverageMapping(source2Id, test2Id);
+
+    // Record some test history
+    db.recordTestResult('tests/test_main.lua', false, 100, 'abc', ['src/main.cpp']);
+    db.recordTestResult('tests/test_utils.lua', true, 50);
+
+    const recommendations = db.getSmartRecommendations(['src/main.cpp']);
+
+    expect(recommendations).toHaveLength(1);
+    expect(recommendations[0].testPath).toBe('tests/test_main.lua');
+    expect(recommendations[0].priorityScore).toBeGreaterThan(0);
+  });
+
+  it('should batch record test results', () => {
+    const results = [
+      { testPath: 'tests/test1.lua', passed: true, durationMs: 100 },
+      { testPath: 'tests/test2.lua', passed: false, durationMs: 200 },
+      { testPath: 'tests/test3.lua', passed: true, durationMs: 150 },
+    ];
+
+    db.batchRecordTestResults(results);
+
+    expect(db.getTestStats('tests/test1.lua')?.totalPasses).toBe(1);
+    expect(db.getTestStats('tests/test2.lua')?.totalFailures).toBe(1);
+    expect(db.getTestStats('tests/test3.lua')?.totalPasses).toBe(1);
+  });
+
+  it('should get most likely to fail tests', () => {
+    db.recordTestResult('tests/flaky.lua', false);
+    db.recordTestResult('tests/flaky.lua', false);
+    db.recordTestResult('tests/flaky.lua', false);
+    db.recordTestResult('tests/stable.lua', true);
+    db.recordTestResult('tests/stable.lua', true);
+
+    const likelyToFail = db.getMostLikelyToFail(5);
+
+    expect(likelyToFail).toHaveLength(1);
+    expect(likelyToFail[0].testPath).toBe('tests/flaky.lua');
+    expect(likelyToFail[0].recentFailureRate).toBeGreaterThan(0.5);
+  });
+
+  it('should estimate test duration', () => {
+    db.recordTestResult('tests/fast.lua', true, 100);
+    db.recordTestResult('tests/slow.lua', true, 5000);
+
+    const estimation = db.getEstimatedDuration(['tests/fast.lua', 'tests/slow.lua']);
+
+    expect(estimation.totalMs).toBeGreaterThan(0);
+    expect(estimation.breakdown).toHaveLength(2);
+  });
+});
+
+describe('Incremental update operations', () => {
+  let tempDir: string;
+  let dbPath: string;
+  let db: TiaDatabase;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tiacc-test-'));
+    dbPath = join(tempDir, 'test.db');
+    db = initDatabase(dbPath);
+  });
+
+  afterEach(() => {
+    db.close();
+    if (existsSync(dbPath)) {
+      unlinkSync(dbPath);
+    }
+    rmdirSync(tempDir);
+  });
+
+  it('should detect new files need processing', () => {
+    const needsProcessing = db.needsProcessing('coverage/test.json', 12345);
+    expect(needsProcessing).toBe(true);
+  });
+
+  it('should detect modified files need processing', () => {
+    const testId = db.upsertTestScript('tests/test.lua');
+    db.recordProcessedFile('coverage/test.json', testId, 12345);
+
+    const needsProcessing = db.needsProcessing('coverage/test.json', 54321);
+    expect(needsProcessing).toBe(true);
+  });
+
+  it('should not reprocess unchanged files', () => {
+    const testId = db.upsertTestScript('tests/test.lua');
+    db.recordProcessedFile('coverage/test.json', testId, 12345);
+
+    const needsProcessing = db.needsProcessing('coverage/test.json', 12345);
+    expect(needsProcessing).toBe(false);
+  });
+
+  it('should clear test mappings', () => {
+    const sourceId = db.upsertSourceFile('src/main.cpp');
+    const testId = db.upsertTestScript('tests/test.lua');
+    db.addCoverageMapping(sourceId, testId);
+
+    const stats1 = db.getStats();
+    expect(stats1.mappings).toBe(1);
+
+    db.clearTestMappings(testId);
+
+    const stats2 = db.getStats();
+    expect(stats2.mappings).toBe(0);
+  });
+});
