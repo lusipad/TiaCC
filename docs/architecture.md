@@ -362,6 +362,60 @@ CREATE TABLE coverage_runs (
     total_sources INTEGER,
     commit_hash TEXT
 );
+
+-- ============ 增量更新表 (Phase 3) ============
+
+-- 已处理的覆盖率文件跟踪（用于增量更新）
+CREATE TABLE processed_files (
+    id INTEGER PRIMARY KEY,
+    file_path TEXT UNIQUE NOT NULL,
+    file_hash TEXT,
+    file_mtime INTEGER,
+    test_script_id INTEGER,
+    processed_at TEXT,
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
+
+-- ============ 智能推荐表 (Phase 4) ============
+
+-- 测试执行历史（用于失败预测）
+CREATE TABLE test_history (
+    id INTEGER PRIMARY KEY,
+    test_script_id INTEGER NOT NULL,
+    run_date TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    duration_ms INTEGER,
+    commit_hash TEXT,
+    changed_files TEXT,
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
+
+-- 测试统计聚合（快速访问）
+CREATE TABLE test_stats (
+    test_script_id INTEGER PRIMARY KEY,
+    total_runs INTEGER DEFAULT 0,
+    total_passes INTEGER DEFAULT 0,
+    total_failures INTEGER DEFAULT 0,
+    avg_duration_ms INTEGER,
+    last_failure_date TEXT,
+    failure_streak INTEGER DEFAULT 0,
+    recent_failure_rate REAL DEFAULT 0,
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
+
+-- 文件变更与测试失败的关联性分析
+CREATE TABLE failure_correlations (
+    id INTEGER PRIMARY KEY,
+    source_file_id INTEGER NOT NULL,
+    test_script_id INTEGER NOT NULL,
+    correlation_score REAL DEFAULT 0,
+    failure_count INTEGER DEFAULT 0,
+    total_changes INTEGER DEFAULT 0,
+    last_updated TEXT,
+    UNIQUE(source_file_id, test_script_id),
+    FOREIGN KEY (source_file_id) REFERENCES source_files(id),
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
 ```
 
 ---
@@ -431,11 +485,28 @@ test_006 ─┴─────┴───────────────�
 
 ### 6.1 支持的格式
 
-| 格式 | 扩展名 | 来源 | 解析器 |
-|------|--------|------|--------|
-| LLVM Profile Raw | `.profraw` | Clang 编译 | CppCoverageParser |
-| LLVM JSON Export | `.cov.json` | llvm-cov export | LlvmJsonCoverageParser |
-| Coverlet JSON | `.coverage.json` | dotnet test | CSharpCoverageParser |
+TiaCC 支持多种主流覆盖率格式，满足不同语言和工具链的需求：
+
+| 格式 | 扩展名 | 来源 | 解析器 | 语言支持 |
+|------|--------|------|--------|---------|
+| LLVM Profile Raw | `.profraw` | Clang 编译 | CppCoverageParser | C/C++ |
+| LLVM JSON Export | `.cov.json` | llvm-cov export | LlvmJsonCoverageParser | C/C++ |
+| Coverlet JSON | `.coverage.json` | dotnet test | CSharpCoverageParser | C#/.NET |
+| Cobertura XML | `.cobertura.xml`, `.coverage.xml` | 多种工具 | CoberturaCoverageParser | 多语言通用 |
+| OpenCppCoverage | `CoverageReport*.xml` | OpenCppCoverage | OpenCppCoverageParser | C++ (Windows) |
+| LCOV/gcov | `.info` | gcov, lcov | LcovCoverageParser | C/C++ |
+| JaCoCo | `jacoco*.xml` | JaCoCo | JacocoCoverageParser | Java |
+| Istanbul/nyc | `coverage*.json` | Istanbul, nyc | IstanbulCoverageParser | JavaScript/TypeScript |
+| coverage.py | `coverage*.json` | coverage.py | CoveragePyCoverageParser | Python |
+| dotCover | `dotcover*.xml` | JetBrains dotCover | DotCoverCoverageParser | .NET |
+| LuaCov | `luacov*.out` | LuaCov | LuaCovCoverageParser | Lua |
+
+**推荐使用**：
+- C++: LLVM JSON Export (`.cov.json`) - 预处理后的格式，解析速度快
+- C#: Coverlet JSON (`.coverage.json`) - .NET 官方推荐
+- Java: JaCoCo XML - Java 生态标准
+- JavaScript/TypeScript: Istanbul JSON - Node.js 生态标准
+- 通用: Cobertura XML - 跨语言兼容性最好
 
 ### 6.2 LLVM JSON 格式示例
 
@@ -502,7 +573,7 @@ tia-mapper export --db impact_map.db --output ./dashboard/data
 ### 7.2 tia-recommend
 
 ```bash
-# 推荐受影响的测试
+# 基础推荐：受影响的测试
 tia-recommend \
   --db impact_map.db \
   [--base HEAD~1] \
@@ -511,6 +582,24 @@ tia-recommend \
   [--output tests.txt] \
   [--json] \
   [--quiet]
+
+# 智能推荐：带优先级和失败预测 (Phase 4)
+tia-recommend \
+  --db impact_map.db \
+  --smart \
+  [--show-probability]  # 显示失败概率
+  [--show-duration]     # 显示预计耗时
+  [--top 10]            # 只显示优先级最高的 10 个测试
+  [--min-probability 0.3]  # 只显示失败概率 >= 30% 的测试
+
+# 分析最易失败的测试（基于历史数据）
+tia-recommend --db impact_map.db --flaky
+
+# 精确测试方法推荐
+tia-recommend \
+  --db impact_map.db \
+  --methods            # 输出 ClassName::methodName
+  [--group-by-class]   # 按类分组显示
 ```
 
 ---
@@ -692,25 +781,136 @@ export class NewFormatParser extends CoverageParser {
 
 ---
 
-## 10. 性能考量
+## 10. 智能推荐功能 (Phase 4)
 
-### 10.1 映射数据库大小
+### 10.1 概述
+
+TiaCC 的智能推荐功能不仅基于代码覆盖率，还结合了**测试历史数据**和**失败预测算法**，提供更智能的测试选择策略。
+
+### 10.2 优先级评分算法
+
+智能推荐使用多维度评分模型，为每个受影响的测试计算优先级分数：
+
+```
+priority_score = w1 * coverage_score
+               + w2 * failure_probability
+               + w3 * recency_score
+               + w4 * (1 / execution_time_factor)
+
+其中:
+- coverage_score: 覆盖率评分 (0-1)
+- failure_probability: 失败概率 (0-1)，基于历史失败率
+- recency_score: 最近失败的时间衰减分数
+- execution_time_factor: 执行时间因子，优先推荐快速测试
+- w1, w2, w3, w4: 权重参数
+```
+
+### 10.3 失败预测
+
+基于历史数据预测测试失败概率：
+
+**数据来源**：
+- `test_history`: 测试执行历史（通过/失败、耗时、关联的变更文件）
+- `test_stats`: 聚合统计（总运行次数、失败率、失败连续次数）
+- `failure_correlations`: 文件变更与测试失败的关联分析
+
+**预测方法**：
+1. **历史失败率**: `recent_failure_rate` - 最近 N 次运行的失败比例
+2. **失败连续性**: `failure_streak` - 连续失败次数，值越大概率越高
+3. **关联性分析**: `correlation_score` - 特定文件变更导致该测试失败的历史关联度
+
+### 10.4 使用示例
+
+```bash
+# 1. 智能推荐：自动按优先级排序
+tia-recommend --db impact_map.db --smart --branch origin/main
+
+# 输出示例:
+# 🎯 Smart Test Recommendations
+#
+# High Priority Tests (3):
+#   1. test_auth_login         [P: 0.92, Fail: 45%, ~2.5s]
+#   2. test_payment_process    [P: 0.85, Fail: 38%, ~5.1s]
+#   3. test_cache_invalidation [P: 0.78, Fail: 12%, ~1.2s]
+#
+# Medium Priority Tests (5):
+#   ...
+
+# 2. 只运行最易失败的测试
+tia-recommend --db impact_map.db --smart --min-probability 0.3 --top 5
+
+# 3. 分析项目中最脆弱的测试
+tia-recommend --db impact_map.db --flaky
+
+# 输出示例:
+# 🔍 Flaky Test Analysis
+#
+# Most Flaky Tests:
+#   1. test_concurrent_access  [Fail Rate: 68%, Streak: 5, Runs: 42]
+#   2. test_network_timeout    [Fail Rate: 52%, Streak: 3, Runs: 89]
+#   3. test_race_condition     [Fail Rate: 43%, Streak: 2, Runs: 31]
+```
+
+### 10.5 数据收集
+
+要启用智能推荐，需要在 CI 中记录测试执行结果：
+
+```typescript
+import { TiaCC } from '@tiacc/tools';
+
+const tia = await TiaCC.init('./impact_map.db');
+
+// 记录测试执行结果
+await tia.recordTestResult({
+  testPath: 'test_calculator.cpp',
+  passed: true,
+  durationMs: 1250,
+  commitHash: 'abc123',
+  changedFiles: ['src/calculator.cpp']
+});
+```
+
+### 10.6 适用场景
+
+| 场景 | 推荐策略 |
+|------|---------|
+| **PR 快速验证** | `--smart --top 10` - 只运行最重要的 10 个测试 |
+| **Merge 前检查** | `--smart --min-probability 0.3` - 运行高风险测试 |
+| **定期质量分析** | `--flaky` - 找出不稳定的测试并修复 |
+| **大规模重构** | `--level function --methods` - 精确到函数级别 |
+
+---
+
+## 11. 性能考量
+
+### 11.1 映射数据库大小
 
 | 规模 | 源文件数 | 测试数 | 映射数 | 数据库大小 |
 |------|---------|--------|--------|-----------|
 | 小型 | 100 | 200 | 1,000 | ~1 MB |
 | 中型 | 1,000 | 2,000 | 20,000 | ~10 MB |
 | 大型 | 10,000 | 20,000 | 500,000 | ~100 MB |
+| 超大型（含历史数据） | 10,000 | 20,000 | 500,000 + 1M历史记录 | ~200 MB |
 
-### 10.2 查询性能
+### 11.2 查询性能
 
 - 文件级查询: O(log n) - 使用索引
 - 符号级查询: O(log n) - 使用复合索引
 - 批量插入: 使用事务批处理，100x 性能提升
+- 智能推荐查询: O(n * log n) - 需要计算所有受影响测试的优先级分数
+
+### 11.3 并发处理
+
+`tia-mapper build` 支持并发处理多个覆盖率文件：
+
+```bash
+# 使用 8 个并发 worker 处理
+tia-mapper build --coverage-dir ./coverage --concurrency 8
+```
 
 ---
 
-## 11. 安全考量
+## 12. 安全考量
 
 1. **覆盖率服务**: 默认只监听 localhost
 2. **数据库**: 本地 SQLite，无网络暴露
