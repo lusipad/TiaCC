@@ -1,0 +1,101 @@
+name: 'TiaCC - Test Impact Analysis'
+description: 'Identify affected tests based on code coverage data. Reduce CI time by running only relevant tests.'
+author: 'TiaCC'
+
+branding:
+  icon: 'target'
+  color: 'blue'
+
+inputs:
+  mode:
+    description: 'Operation mode: build (create mapping), recommend (get affected tests), or auto (build + recommend)'
+    required: false
+    default: 'auto'
+
+  coverage-dir:
+    description: 'Directory containing coverage files'
+    required: false
+    default: './coverage'
+
+  database:
+    description: 'Path to the impact map database'
+    required: false
+    default: './impact_map.db'
+
+  base-branch:
+    description: 'Base branch to compare against (for recommend mode)'
+    required: false
+    default: 'origin/main'
+
+  base-commit:
+    description: 'Base commit to compare against (overrides base-branch)'
+    required: false
+    default: ''
+
+  format:
+    description: 'Coverage format: auto, cobertura, lcov, jacoco, istanbul, coveragepy, dotcover, opencppcoverage'
+    required: false
+    default: 'auto'
+
+  output-file:
+    description: 'File to write affected tests list'
+    required: false
+    default: 'affected-tests.txt'
+
+  output-format:
+    description: 'Output format: text, json, or github (for PR comment)'
+    required: false
+    default: 'text'
+
+  base-path:
+    description: 'Base path to strip from source file paths'
+    required: false
+    default: ''
+
+  test-id-from-filename:
+    description: 'Parse test ID from filename format'
+    required: false
+    default: 'false'
+
+  verbose:
+    description: 'Enable verbose output'
+    required: false
+    default: 'false'
+
+  fail-on-no-tests:
+    description: 'Fail if no tests are found for changed files'
+    required: false
+    default: 'false'
+
+  upload-artifact:
+    description: 'Upload database as artifact for caching'
+    required: false
+    default: 'true'
+
+  download-artifact:
+    description: 'Download database artifact from previous runs'
+    required: false
+    default: 'true'
+
+  artifact-name:
+    description: 'Name of the artifact for database caching'
+    required: false
+    default: 'tiacc-database'
+
+outputs:
+  affected-tests:
+    description: 'List of affected tests (newline separated)'
+  affected-count:
+    description: 'Number of affected tests'
+  changed-files:
+    description: 'List of changed files'
+  changed-count:
+    description: 'Number of changed files'
+  coverage-rate:
+    description: 'Percentage of changed files with test coverage'
+  has-affected-tests:
+    description: 'Whether there are any affected tests (true/false)'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

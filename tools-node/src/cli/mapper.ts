@@ -12,8 +12,29 @@ import ora from 'ora';
 import * as fs from 'fs';
 import * as path from 'path';
 import { initDatabase } from '../database.js';
-import { CppCoverageParser, CSharpCoverageParser, LlvmJsonCoverageParser, CoberturaCoverageParser } from '../coverage-parser.js';
-import type { CoberturaParserOptions } from '../coverage-parser.js';
+import {
+  CppCoverageParser,
+  CSharpCoverageParser,
+  LlvmJsonCoverageParser,
+  CoberturaCoverageParser,
+  OpenCppCoverageParser,
+  LcovCoverageParser,
+  JacocoCoverageParser,
+  IstanbulCoverageParser,
+  CoveragePyCoverageParser,
+  DotCoverCoverageParser,
+  LuaCovCoverageParser,
+} from '../coverage-parser.js';
+import type {
+  CoberturaParserOptions,
+  OpenCppCoverageOptions,
+  LcovParserOptions,
+  JacocoParserOptions,
+  IstanbulParserOptions,
+  CoveragePyParserOptions,
+  DotCoverParserOptions,
+  LuaCovParserOptions,
+} from '../coverage-parser.js';
 import { GitUtils } from '../git-utils.js';
 
 const program = new Command();
@@ -62,6 +83,21 @@ program
   .option('-v, --verbose', 'Enable verbose output')
   .option('--test-id-from-env <varName>', 'Read testId from environment variable (for Cobertura files)')
   .option('--test-id-from-source', 'Read testId from <source> tag in Cobertura XML (for LuaUnit integration)')
+  .option('--test-id-from-filename', 'Parse testId from filename format: Test_ClassName__test_methodName.cobertura.xml')
+  .option('--opencppcoverage', 'Enable OpenCppCoverage format support (CoverageReport*.xml)')
+  .option('--opencppcoverage-pattern <pattern>', 'Glob pattern for OpenCppCoverage files', 'CoverageReport*.xml')
+  .option('--lcov', 'Enable LCOV/gcov format support (*.info files)')
+  .option('--lcov-pattern <pattern>', 'Glob pattern for LCOV files', '*.info')
+  .option('--jacoco', 'Enable JaCoCo format support (jacoco*.xml)')
+  .option('--jacoco-pattern <pattern>', 'Glob pattern for JaCoCo files', 'jacoco*.xml')
+  .option('--istanbul', 'Enable Istanbul/nyc format support (coverage-final.json)')
+  .option('--istanbul-pattern <pattern>', 'Glob pattern for Istanbul files', 'coverage*.json')
+  .option('--coveragepy', 'Enable coverage.py format support (Python)')
+  .option('--coveragepy-pattern <pattern>', 'Glob pattern for coverage.py files', 'coverage*.json')
+  .option('--dotcover', 'Enable dotCover format support (.NET)')
+  .option('--dotcover-pattern <pattern>', 'Glob pattern for dotCover files', 'dotcover*.xml')
+  .option('--luacov', 'Enable LuaCov format support (Lua/LuaUnit)')
+  .option('--luacov-pattern <pattern>', 'Glob pattern for LuaCov files', 'luacov*.out')
   .action(async (options) => {
     const spinner = ora('Initializing...').start();
 
@@ -106,12 +142,125 @@ program
       // Merge and deduplicate Cobertura files
       const allCoberturaFiles = [...new Set([...coberturaFiles, ...coberturaXmlFiles])];
 
+      // OpenCppCoverage files
+      let openCppCoverageFiles: string[] = [];
+      if (options.opencppcoverage) {
+        openCppCoverageFiles = await glob(options.opencppcoveragePattern, { cwd: options.coverageDir });
+        // Also search in subdirectories (OpenCppCoverage creates CoverageReport-* directories)
+        const subDirFiles = await glob('**/CoverageReport*/*.xml', { cwd: options.coverageDir });
+        openCppCoverageFiles = [...new Set([...openCppCoverageFiles, ...subDirFiles])];
+        // Exclude from Cobertura files to avoid double processing
+        const openCppSet = new Set(openCppCoverageFiles);
+        const filteredCoberturaFiles = allCoberturaFiles.filter(f => !openCppSet.has(f));
+        allCoberturaFiles.length = 0;
+        allCoberturaFiles.push(...filteredCoberturaFiles);
+      }
+
+      // LCOV/gcov files
+      let lcovFiles: string[] = [];
+      if (options.lcov) {
+        lcovFiles = await glob(options.lcovPattern, { cwd: options.coverageDir });
+        // Also search for common lcov output patterns
+        const lcovInfoFiles = await glob('**/*.info', { cwd: options.coverageDir });
+        const lcovReportFiles = await glob('**/lcov.info', { cwd: options.coverageDir });
+        lcovFiles = [...new Set([...lcovFiles, ...lcovInfoFiles, ...lcovReportFiles])];
+      }
+
+      // JaCoCo files
+      let jacocoFiles: string[] = [];
+      if (options.jacoco) {
+        jacocoFiles = await glob(options.jacocoPattern, { cwd: options.coverageDir });
+        // Also search in common Maven/Gradle output locations
+        const mavenJacocoFiles = await glob('**/target/site/jacoco/*.xml', { cwd: options.coverageDir });
+        const gradleJacocoFiles = await glob('**/build/reports/jacoco/**/*.xml', { cwd: options.coverageDir });
+        jacocoFiles = [...new Set([...jacocoFiles, ...mavenJacocoFiles, ...gradleJacocoFiles])];
+        // Exclude from Cobertura files to avoid double processing
+        const jacocoSet = new Set(jacocoFiles);
+        const filteredCoberturaFiles = allCoberturaFiles.filter(f => !jacocoSet.has(f));
+        allCoberturaFiles.length = 0;
+        allCoberturaFiles.push(...filteredCoberturaFiles);
+      }
+
+      // Istanbul/nyc files
+      let istanbulFiles: string[] = [];
+      if (options.istanbul) {
+        istanbulFiles = await glob(options.istanbulPattern, { cwd: options.coverageDir });
+        // Also search for common Istanbul output patterns
+        const coverageFinalFiles = await glob('**/coverage-final.json', { cwd: options.coverageDir });
+        const nycOutputFiles = await glob('**/.nyc_output/*.json', { cwd: options.coverageDir });
+        istanbulFiles = [...new Set([...istanbulFiles, ...coverageFinalFiles, ...nycOutputFiles])];
+      }
+
+      // coverage.py files
+      let coveragePyFiles: string[] = [];
+      if (options.coveragepy) {
+        coveragePyFiles = await glob(options.coveragepyPattern, { cwd: options.coverageDir });
+        // Also search for coverage.py specific patterns
+        const coverageJsonFiles = await glob('**/coverage.json', { cwd: options.coverageDir });
+        const htmlcovFiles = await glob('**/htmlcov/coverage.json', { cwd: options.coverageDir });
+        coveragePyFiles = [...new Set([...coveragePyFiles, ...coverageJsonFiles, ...htmlcovFiles])];
+        // Exclude Istanbul files to avoid double processing
+        const istanbulSet = new Set(istanbulFiles);
+        coveragePyFiles = coveragePyFiles.filter(f => !istanbulSet.has(f));
+      }
+
+      // dotCover files
+      let dotCoverFiles: string[] = [];
+      if (options.dotcover) {
+        dotCoverFiles = await glob(options.dotcoverPattern, { cwd: options.coverageDir });
+        // Also search for common dotCover patterns
+        const dotCoverReportFiles = await glob('**/dotCover*.xml', { cwd: options.coverageDir });
+        const dcvrFiles = await glob('**/*.dcvr', { cwd: options.coverageDir });
+        dotCoverFiles = [...new Set([...dotCoverFiles, ...dotCoverReportFiles, ...dcvrFiles])];
+        // Exclude from Cobertura files to avoid double processing
+        const dotCoverSet = new Set(dotCoverFiles);
+        const filteredCoberturaFiles = allCoberturaFiles.filter(f => !dotCoverSet.has(f));
+        allCoberturaFiles.length = 0;
+        allCoberturaFiles.push(...filteredCoberturaFiles);
+      }
+
+      // LuaCov files (Lua/LuaUnit)
+      let luaCovFiles: string[] = [];
+      if (options.luacov) {
+        luaCovFiles = await glob(options.luacovPattern, { cwd: options.coverageDir });
+        // Also search for common LuaCov output patterns
+        const statsFiles = await glob('**/luacov.stats.out', { cwd: options.coverageDir });
+        const reportFiles = await glob('**/luacov.report.out', { cwd: options.coverageDir });
+        const outFiles = await glob('**/*.luacov.out', { cwd: options.coverageDir });
+        luaCovFiles = [...new Set([...luaCovFiles, ...statsFiles, ...reportFiles, ...outFiles])];
+      }
+
       spinner.info(`Found ${profrawFiles.length} C++ profraw files`);
       spinner.info(`Found ${llvmJsonFiles.length} LLVM JSON files`);
       spinner.info(`Found ${coverletFiles.length} C# coverage files`);
       spinner.info(`Found ${allCoberturaFiles.length} Cobertura XML files`);
+      if (options.opencppcoverage) {
+        spinner.info(`Found ${openCppCoverageFiles.length} OpenCppCoverage files`);
+      }
+      if (options.lcov) {
+        spinner.info(`Found ${lcovFiles.length} LCOV/gcov files`);
+      }
+      if (options.jacoco) {
+        spinner.info(`Found ${jacocoFiles.length} JaCoCo files`);
+      }
+      if (options.istanbul) {
+        spinner.info(`Found ${istanbulFiles.length} Istanbul/nyc files`);
+      }
+      if (options.coveragepy) {
+        spinner.info(`Found ${coveragePyFiles.length} coverage.py files`);
+      }
+      if (options.dotcover) {
+        spinner.info(`Found ${dotCoverFiles.length} dotCover files`);
+      }
+      if (options.luacov) {
+        spinner.info(`Found ${luaCovFiles.length} LuaCov files`);
+      }
 
-      if (profrawFiles.length === 0 && llvmJsonFiles.length === 0 && coverletFiles.length === 0 && allCoberturaFiles.length === 0) {
+      const totalFiles = profrawFiles.length + llvmJsonFiles.length + coverletFiles.length +
+        allCoberturaFiles.length + openCppCoverageFiles.length + lcovFiles.length +
+        jacocoFiles.length + istanbulFiles.length + coveragePyFiles.length + dotCoverFiles.length +
+        luaCovFiles.length;
+      if (totalFiles === 0) {
         spinner.warn('No coverage files found.');
         db.close();
         return;
@@ -302,6 +451,7 @@ program
         const coberturaOptions: CoberturaParserOptions = {
           testIdFromEnv: options.testIdFromEnv,
           testIdFromSource: options.testIdFromSource,
+          testIdFromFilename: options.testIdFromFilename,
         };
         const coberturaParser = new CoberturaCoverageParser(coberturaOptions);
 
@@ -362,6 +512,456 @@ program
         spinner.succeed(`Processed ${allCoberturaFiles.length} Cobertura XML coverage files`);
       }
 
+      // Process OpenCppCoverage files
+      if (openCppCoverageFiles.length > 0) {
+        spinner.start('Processing OpenCppCoverage files...');
+
+        // Build OpenCppCoverage parser options
+        const openCppOptions: OpenCppCoverageOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+          basePath: options.basePath,
+        };
+        const openCppParser = new OpenCppCoverageParser(openCppOptions);
+
+        for (let i = 0; i < openCppCoverageFiles.length; i++) {
+          const file = openCppCoverageFiles[i];
+          spinner.text = `Processing OpenCppCoverage [${i + 1}/${openCppCoverageFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await openCppParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            // File-level mappings
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            // Symbol-level mappings (classes/methods)
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${openCppCoverageFiles.length} OpenCppCoverage files`);
+      }
+
+      // Process LCOV/gcov files
+      if (lcovFiles.length > 0) {
+        spinner.start('Processing LCOV/gcov coverage files...');
+
+        const lcovOptions: LcovParserOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+          basePath: options.basePath,
+        };
+        const lcovParser = new LcovCoverageParser(lcovOptions);
+
+        for (let i = 0; i < lcovFiles.length; i++) {
+          const file = lcovFiles[i];
+          spinner.text = `Processing LCOV [${i + 1}/${lcovFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await lcovParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${lcovFiles.length} LCOV/gcov coverage files`);
+      }
+
+      // Process JaCoCo files
+      if (jacocoFiles.length > 0) {
+        spinner.start('Processing JaCoCo coverage files...');
+
+        const jacocoOptions: JacocoParserOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+        };
+        const jacocoParser = new JacocoCoverageParser(jacocoOptions);
+
+        for (let i = 0; i < jacocoFiles.length; i++) {
+          const file = jacocoFiles[i];
+          spinner.text = `Processing JaCoCo [${i + 1}/${jacocoFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await jacocoParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${jacocoFiles.length} JaCoCo coverage files`);
+      }
+
+      // Process Istanbul/nyc files
+      if (istanbulFiles.length > 0) {
+        spinner.start('Processing Istanbul/nyc coverage files...');
+
+        const istanbulOptions: IstanbulParserOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+          basePath: options.basePath,
+        };
+        const istanbulParser = new IstanbulCoverageParser(istanbulOptions);
+
+        for (let i = 0; i < istanbulFiles.length; i++) {
+          const file = istanbulFiles[i];
+          spinner.text = `Processing Istanbul [${i + 1}/${istanbulFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await istanbulParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${istanbulFiles.length} Istanbul/nyc coverage files`);
+      }
+
+      // Process coverage.py files
+      if (coveragePyFiles.length > 0) {
+        spinner.start('Processing coverage.py coverage files...');
+
+        const coveragePyOptions: CoveragePyParserOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+          basePath: options.basePath,
+        };
+        const coveragePyParser = new CoveragePyCoverageParser(coveragePyOptions);
+
+        for (let i = 0; i < coveragePyFiles.length; i++) {
+          const file = coveragePyFiles[i];
+          spinner.text = `Processing coverage.py [${i + 1}/${coveragePyFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await coveragePyParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${coveragePyFiles.length} coverage.py coverage files`);
+      }
+
+      // Process dotCover files
+      if (dotCoverFiles.length > 0) {
+        spinner.start('Processing dotCover coverage files...');
+
+        const dotCoverOptions: DotCoverParserOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+          basePath: options.basePath,
+        };
+        const dotCoverParser = new DotCoverCoverageParser(dotCoverOptions);
+
+        for (let i = 0; i < dotCoverFiles.length; i++) {
+          const file = dotCoverFiles[i];
+          spinner.text = `Processing dotCover [${i + 1}/${dotCoverFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await dotCoverParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${dotCoverFiles.length} dotCover coverage files`);
+      }
+
+      // Process LuaCov files (Lua/LuaUnit)
+      if (luaCovFiles.length > 0) {
+        spinner.start('Processing LuaCov coverage files...');
+
+        const luaCovOptions: LuaCovParserOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+          basePath: options.basePath,
+        };
+        const luaCovParser = new LuaCovCoverageParser(luaCovOptions);
+
+        for (let i = 0; i < luaCovFiles.length; i++) {
+          const file = luaCovFiles[i];
+          spinner.text = `Processing LuaCov [${i + 1}/${luaCovFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await luaCovParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${luaCovFiles.length} LuaCov coverage files`);
+      }
+
       // Record run metadata
       db.recordCoverageRun(totalTests, totalSources.size, commit ?? undefined);
 
@@ -384,6 +984,287 @@ program
   });
 
 program
+  .command('update')
+  .description('Incremental update - only process new or modified coverage files')
+  .option('-c, --coverage-dir <dir>', 'Directory containing coverage files', './coverage_data')
+  .option('-d, --db <path>', 'Database path', 'impact_map.db')
+  .option('-b, --base-path <path>', 'Base path to strip from source file paths')
+  .option('--commit <hash>', 'Git commit hash to associate with this run')
+  .option('-v, --verbose', 'Enable verbose output')
+  .option('--purge', 'Remove mappings for deleted coverage files')
+  .option('--test-id-from-filename', 'Parse testId from filename')
+  .option('--cobertura', 'Process Cobertura XML files')
+  .option('--lcov', 'Process LCOV files')
+  .option('--jacoco', 'Process JaCoCo files')
+  .option('--istanbul', 'Process Istanbul files')
+  .option('--coveragepy', 'Process coverage.py files')
+  .option('--dotcover', 'Process dotCover files')
+  .option('--luacov', 'Process LuaCov files')
+  .option('--opencppcoverage', 'Process OpenCppCoverage files')
+  .action(async (options) => {
+    const spinner = ora('Initializing incremental update...').start();
+
+    try {
+      const db = initDatabase(options.db);
+
+      // Get git commit if not specified
+      let commit = options.commit;
+      if (!commit) {
+        const git = new GitUtils();
+        commit = await git.getCurrentCommitHash(true);
+      }
+
+      // Path normalization helper
+      const basePath = options.basePath
+        ? path.resolve(options.basePath).replace(/\\/g, '/')
+        : null;
+
+      const normalizePath = (filePath: string): string => {
+        let normalized = filePath.replace(/\\/g, '/');
+        if (basePath && normalized.startsWith(basePath)) {
+          normalized = normalized.slice(basePath.length);
+          if (normalized.startsWith('/')) {
+            normalized = normalized.slice(1);
+          }
+        }
+        return normalized;
+      };
+
+      // Collect all coverage files based on enabled formats
+      spinner.text = 'Scanning for coverage files...';
+      const allCoverageFiles: Array<{ path: string; format: string }> = [];
+
+      // Cobertura
+      if (options.cobertura) {
+        const files = await glob('**/*.{cobertura.xml,coverage.xml}', { cwd: options.coverageDir });
+        files.forEach(f => allCoverageFiles.push({ path: f, format: 'cobertura' }));
+      }
+
+      // LCOV
+      if (options.lcov) {
+        const files = await glob('**/*.info', { cwd: options.coverageDir });
+        files.forEach(f => allCoverageFiles.push({ path: f, format: 'lcov' }));
+      }
+
+      // JaCoCo
+      if (options.jacoco) {
+        const files = await glob('**/jacoco*.xml', { cwd: options.coverageDir });
+        files.forEach(f => allCoverageFiles.push({ path: f, format: 'jacoco' }));
+      }
+
+      // Istanbul
+      if (options.istanbul) {
+        const files = await glob('**/coverage-final.json', { cwd: options.coverageDir });
+        files.forEach(f => allCoverageFiles.push({ path: f, format: 'istanbul' }));
+      }
+
+      // coverage.py
+      if (options.coveragepy) {
+        const files = await glob('**/coverage.json', { cwd: options.coverageDir });
+        files.forEach(f => allCoverageFiles.push({ path: f, format: 'coveragepy' }));
+      }
+
+      // dotCover
+      if (options.dotcover) {
+        const files = await glob('**/dotcover*.xml', { cwd: options.coverageDir });
+        files.forEach(f => allCoverageFiles.push({ path: f, format: 'dotcover' }));
+      }
+
+      // LuaCov
+      if (options.luacov) {
+        const files = await glob('**/luacov*.out', { cwd: options.coverageDir });
+        files.forEach(f => allCoverageFiles.push({ path: f, format: 'luacov' }));
+      }
+
+      // OpenCppCoverage
+      if (options.opencppcoverage) {
+        const files = await glob('**/CoverageReport*.xml', { cwd: options.coverageDir });
+        files.forEach(f => allCoverageFiles.push({ path: f, format: 'opencppcoverage' }));
+      }
+
+      // If no format specified, try to detect all
+      if (!options.cobertura && !options.lcov && !options.jacoco && !options.istanbul &&
+          !options.coveragepy && !options.dotcover && !options.luacov && !options.opencppcoverage) {
+        // Auto-detect all formats
+        const coberturaFiles = await glob('**/*.{cobertura.xml,coverage.xml}', { cwd: options.coverageDir });
+        coberturaFiles.forEach(f => allCoverageFiles.push({ path: f, format: 'cobertura' }));
+
+        const lcovFiles = await glob('**/*.info', { cwd: options.coverageDir });
+        lcovFiles.forEach(f => allCoverageFiles.push({ path: f, format: 'lcov' }));
+
+        const jacocoFiles = await glob('**/jacoco*.xml', { cwd: options.coverageDir });
+        jacocoFiles.forEach(f => allCoverageFiles.push({ path: f, format: 'jacoco' }));
+
+        const istanbulFiles = await glob('**/coverage-final.json', { cwd: options.coverageDir });
+        istanbulFiles.forEach(f => allCoverageFiles.push({ path: f, format: 'istanbul' }));
+
+        const luacovFiles = await glob('**/luacov*.out', { cwd: options.coverageDir });
+        luacovFiles.forEach(f => allCoverageFiles.push({ path: f, format: 'luacov' }));
+      }
+
+      spinner.info(`Found ${allCoverageFiles.length} total coverage files`);
+
+      // Purge orphaned records if requested
+      if (options.purge) {
+        spinner.text = 'Purging orphaned records...';
+        const existingPaths = new Set(allCoverageFiles.map(f => `${options.coverageDir}/${f.path}`));
+        const purged = db.purgeOrphanedRecords(existingPaths);
+        if (purged > 0) {
+          spinner.info(`Purged ${purged} orphaned coverage file records`);
+        }
+      }
+
+      // Filter to only files that need processing
+      spinner.text = 'Checking for modified files...';
+      const filesToProcess: Array<{ path: string; format: string; mtime: number }> = [];
+
+      for (const file of allCoverageFiles) {
+        const fullPath = `${options.coverageDir}/${file.path}`;
+        try {
+          const stat = fs.statSync(fullPath);
+          const mtime = Math.floor(stat.mtimeMs);
+
+          if (db.needsProcessing(fullPath, mtime)) {
+            filesToProcess.push({ ...file, mtime });
+          }
+        } catch {
+          // File doesn't exist, skip
+        }
+      }
+
+      spinner.info(`${filesToProcess.length} files need processing (${allCoverageFiles.length - filesToProcess.length} unchanged)`);
+
+      if (filesToProcess.length === 0) {
+        spinner.succeed('No updates needed - all coverage files are up to date');
+        db.close();
+        return;
+      }
+
+      // Create parsers
+      const parsers: Record<string, any> = {
+        cobertura: new CoberturaCoverageParser({ testIdFromFilename: options.testIdFromFilename }),
+        lcov: new LcovCoverageParser({ testIdFromFilename: options.testIdFromFilename, basePath: options.basePath }),
+        jacoco: new JacocoCoverageParser({ testIdFromFilename: options.testIdFromFilename }),
+        istanbul: new IstanbulCoverageParser({ testIdFromFilename: options.testIdFromFilename, basePath: options.basePath }),
+        coveragepy: new CoveragePyCoverageParser({ testIdFromFilename: options.testIdFromFilename, basePath: options.basePath }),
+        dotcover: new DotCoverCoverageParser({ testIdFromFilename: options.testIdFromFilename, basePath: options.basePath }),
+        luacov: new LuaCovCoverageParser({ testIdFromFilename: options.testIdFromFilename, basePath: options.basePath }),
+        opencppcoverage: new OpenCppCoverageParser({ testIdFromFilename: options.testIdFromFilename, basePath: options.basePath }),
+      };
+
+      const totalSources = new Set<string>();
+      let processedTests = 0;
+      let totalSymbols = 0;
+
+      // Process each file that needs updating
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
+        const fullPath = `${options.coverageDir}/${file.path}`;
+        spinner.text = `Processing [${i + 1}/${filesToProcess.length}]: ${file.path}`;
+
+        const parser = parsers[file.format];
+        if (!parser) {
+          if (options.verbose) {
+            console.log(`  Skipping ${file.path}: unknown format ${file.format}`);
+          }
+          continue;
+        }
+
+        const data = await parser.parse(fullPath);
+        if (!data) {
+          if (options.verbose) {
+            console.log(`  Skipping ${file.path}: parse failed`);
+          }
+          continue;
+        }
+
+        // Check if this test was previously processed
+        const existingTestId = db.getTestIdForProcessedFile(fullPath);
+        if (existingTestId) {
+          // Clear old mappings before adding new ones
+          db.clearTestMappings(existingTestId);
+          if (options.verbose) {
+            console.log(`  Cleared old mappings for ${data.testId}`);
+          }
+        }
+
+        // Add new mappings
+        processedTests++;
+        const testId = db.upsertTestScript(data.testId);
+
+        const coveragePct = data.totalLines > 0
+          ? (data.coveredLines / data.totalLines) * 100
+          : 0;
+
+        for (const sourcePath of data.coveredFiles) {
+          const normalizedPath = normalizePath(sourcePath);
+          const sourceId = db.upsertSourceFile(normalizedPath);
+          const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+          db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+          totalSources.add(normalizedPath);
+        }
+
+        // Symbol mappings
+        if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+          for (const sym of data.coveredSymbols) {
+            const normalizedPath = normalizePath(sym.filePath);
+            const sourceId = db.upsertSourceFile(normalizedPath);
+            const symbolId = db.upsertSymbol(
+              sourceId,
+              sym.name,
+              sym.startLine,
+              sym.endLine,
+              sym.type
+            );
+            db.addSymbolCoverage(
+              symbolId,
+              testId,
+              sym.hitCount,
+              sym.lineCoveragePct ?? 0
+            );
+            totalSymbols++;
+          }
+        }
+
+        // Record this file as processed
+        db.recordProcessedFile(fullPath, testId, file.mtime);
+
+        if (options.verbose) {
+          const symCount = data.coveredSymbols?.length ?? 0;
+          console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+        }
+      }
+
+      // Record run metadata
+      db.recordCoverageRun(processedTests, totalSources.size, commit ?? undefined);
+
+      // Print summary
+      const stats = db.getStats();
+      const incrementalStats = db.getIncrementalStats();
+
+      console.log('\n' + '='.repeat(50));
+      console.log('Incremental Update Complete!');
+      console.log(`  Files processed: ${filesToProcess.length}`);
+      console.log(`  Files skipped: ${allCoverageFiles.length - filesToProcess.length}`);
+      console.log(`  Tests updated: ${processedTests}`);
+      console.log(`  Symbol mappings: ${totalSymbols}`);
+      console.log('');
+      console.log('Database totals:');
+      console.log(`  Source files: ${stats.sourceFiles}`);
+      console.log(`  Test scripts: ${stats.testScripts}`);
+      console.log(`  File mappings: ${stats.mappings}`);
+      console.log(`  Tracked coverage files: ${incrementalStats.processedFiles}`);
+      console.log(`  Commit: ${commit ?? 'N/A'}`);
+
+      db.close();
+
+    } catch (error) {
+      spinner.fail(`Error: ${error}`);
+      process.exit(1);
+    }
+  });
+
+program
   .command('stats')
   .description('Show database statistics')
   .option('-d, --db <path>', 'Database path', 'impact_map.db')
@@ -395,6 +1276,13 @@ program
     console.log(`  Source files: ${stats.sourceFiles}`);
     console.log(`  Test scripts: ${stats.testScripts}`);
     console.log(`  Mappings: ${stats.mappings}`);
+
+    // Show incremental stats
+    const incrementalStats = db.getIncrementalStats();
+    if (incrementalStats.processedFiles > 0) {
+      console.log(`  Tracked files: ${incrementalStats.processedFiles}`);
+      console.log(`  Last processed: ${incrementalStats.lastProcessedAt}`);
+    }
 
     const latest = db.getLatestRun();
     if (latest) {

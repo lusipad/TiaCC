@@ -1,0 +1,241 @@
+// TiaCC Jenkins Pipeline Template
+// This Jenkinsfile provides Test Impact Analysis for your CI/CD pipeline
+//
+// Usage:
+//   1. Copy this file to your repository as 'Jenkinsfile'
+//   2. Configure the environment variables below
+//   3. Customize the test commands for your project
+//
+// Requirements:
+//   - Node.js 18+ installed on Jenkins agents
+//   - Git configured for fetching branches
+
+pipeline {
+    agent any
+
+    // Configure these for your project
+    environment {
+        TIACC_DATABASE = 'impact_map.db'
+        TIACC_COVERAGE_DIR = './coverage'
+        TIACC_FORMAT = 'auto'  // auto, cobertura, lcov, jacoco, istanbul, coveragepy, dotcover, opencppcoverage
+        TIACC_BASE_BRANCH = 'origin/main'
+        TIACC_VERBOSE = 'false'
+        NODE_VERSION = '20'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                // Ensure we have full history for diff
+                sh 'git fetch --no-tags origin +refs/heads/*:refs/remotes/origin/*'
+            }
+        }
+
+        stage('Setup') {
+            steps {
+                script {
+                    // Install TiaCC tools
+                    sh 'npm install -g @tiacc/tools'
+                }
+            }
+        }
+
+        stage('Restore TiaCC Database') {
+            steps {
+                script {
+                    // Try to restore database from previous builds
+                    try {
+                        copyArtifacts(
+                            projectName: env.JOB_NAME,
+                            filter: "${TIACC_DATABASE}",
+                            selector: lastSuccessful(),
+                            optional: true
+                        )
+                        echo "Restored TiaCC database from previous build"
+                    } catch (Exception e) {
+                        echo "No previous TiaCC database found, will create new one"
+                    }
+                }
+            }
+        }
+
+        stage('Build TiaCC Mapping') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'master'
+                    triggeredBy 'TimerTrigger'
+                }
+            }
+            steps {
+                script {
+                    // Run all tests with coverage
+                    echo "Running full test suite with coverage..."
+
+                    // Customize this for your project
+                    // Example for Node.js:
+                    // sh 'npm test -- --coverage'
+
+                    // Example for Python:
+                    // sh 'pytest --cov --cov-report=json'
+
+                    // Example for Java:
+                    // sh './gradlew test jacocoTestReport'
+
+                    // Build TiaCC mapping
+                    def formatArg = getFormatArg()
+                    def verboseArg = env.TIACC_VERBOSE == 'true' ? '-v' : ''
+
+                    sh """
+                        tia-mapper build \
+                            -c ${TIACC_COVERAGE_DIR} \
+                            -d ${TIACC_DATABASE} \
+                            ${formatArg} \
+                            ${verboseArg}
+                    """
+                }
+            }
+            post {
+                success {
+                    // Archive database for future builds
+                    archiveArtifacts artifacts: "${TIACC_DATABASE}", fingerprint: true
+                }
+            }
+        }
+
+        stage('Recommend Tests') {
+            when {
+                changeRequest()
+            }
+            steps {
+                script {
+                    if (!fileExists(TIACC_DATABASE)) {
+                        echo "No TiaCC database found. Will run all tests."
+                        env.TIACC_AFFECTED_TESTS = ''
+                        env.TIACC_RUN_ALL = 'true'
+                        return
+                    }
+
+                    def targetBranch = env.CHANGE_TARGET ?: 'main'
+                    def verboseArg = env.TIACC_VERBOSE == 'true' ? '-v' : ''
+
+                    // Get affected tests
+                    def affectedTests = sh(
+                        script: """
+                            tia-recommend \
+                                --db ${TIACC_DATABASE} \
+                                --base origin/${targetBranch} \
+                                ${verboseArg} 2>/dev/null || true
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    if (affectedTests) {
+                        env.TIACC_AFFECTED_TESTS = affectedTests
+                        env.TIACC_RUN_ALL = 'false'
+
+                        echo "=== TiaCC Test Impact Analysis ==="
+                        echo "Affected tests:"
+                        echo affectedTests
+                        echo "=================================="
+
+                        // Write to file for other tools
+                        writeFile file: 'affected-tests.txt', text: affectedTests
+                    } else {
+                        echo "No affected tests identified. Running all tests."
+                        env.TIACC_AFFECTED_TESTS = ''
+                        env.TIACC_RUN_ALL = 'true'
+                    }
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                script {
+                    if (env.TIACC_RUN_ALL == 'true' || !env.TIACC_AFFECTED_TESTS) {
+                        echo "Running all tests..."
+                        runAllTests()
+                    } else {
+                        echo "Running affected tests only..."
+                        runAffectedTests(env.TIACC_AFFECTED_TESTS)
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Clean up workspace
+            cleanWs(cleanWhenNotBuilt: false,
+                    deleteDirs: true,
+                    disableDeferredWipeout: true,
+                    notFailBuild: true)
+        }
+    }
+}
+
+// Helper function to get format argument
+def getFormatArg() {
+    switch(env.TIACC_FORMAT) {
+        case 'lcov':
+            return '--lcov'
+        case 'jacoco':
+            return '--jacoco'
+        case 'istanbul':
+            return '--istanbul'
+        case 'coveragepy':
+            return '--coveragepy'
+        case 'dotcover':
+            return '--dotcover'
+        case 'opencppcoverage':
+            return '--opencppcoverage'
+        case 'cobertura':
+            return ''  // default
+        default:
+            return ''  // auto-detect
+    }
+}
+
+// Customize these functions for your project
+def runAllTests() {
+    // Node.js example:
+    // sh 'npm test'
+
+    // Python example:
+    // sh 'pytest'
+
+    // Java example:
+    // sh './gradlew test'
+
+    // C++ example:
+    // sh 'ctest --test-dir build'
+
+    echo "TODO: Add your test command here"
+}
+
+def runAffectedTests(String tests) {
+    // Node.js (Jest) example:
+    // sh "npx jest --testPathPattern='${tests}'"
+
+    // Python (pytest) example:
+    // sh "pytest ${tests.split('\n').join(' ')}"
+
+    // Java (Gradle) example:
+    // sh "./gradlew test --tests '${tests}'"
+
+    // C++ (CTest) example:
+    // def pattern = tests.split('\n').join('|')
+    // sh "ctest --test-dir build -R '${pattern}'"
+
+    echo "TODO: Add your affected test command here"
+    echo "Affected tests: ${tests}"
+}
