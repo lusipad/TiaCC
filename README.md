@@ -217,12 +217,27 @@ TiaCC/
 └── docs/                # 📚 详细文档
 ```
 
+## 🐕 Dogfooding: TiaCC 测试 TiaCC
+
+**我们用 TiaCC 来测试 TiaCC 自己！**
+
+TiaCC 项目本身就使用自己的工具来优化 CI/CD 流程。这不仅验证了工具的实用性，也为用户提供了真实的集成案例。
+
+```bash
+# 快速体验 TiaCC dogfooding
+cd tools-node
+bash scripts/build-self-test-map.sh
+```
+
+查看完整的 dogfooding 文档：[tools-node/docs/DOGFOODING.md](tools-node/docs/DOGFOODING.md)
+
 ## 📚 更多文档
 
 | 文档 | 描述 |
 |------|------|
 | [架构设计](docs/architecture.md) | 系统架构、数据流、Dashboard 功能详解 |
 | [集成指南](docs/integration-guide.md) | 如何集成到你的项目 |
+| [Dogfooding 案例](tools-node/docs/DOGFOODING.md) | 🐕 如何用 TiaCC 测试 TiaCC 自己 |
 | [E2E 测试](tests/e2e/README.md) | 端到端验证测试说明 |
 
 ## 🤝 贡献

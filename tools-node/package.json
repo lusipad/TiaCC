@@ -31,11 +31,15 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts",
     "mapper": "tsx src/cli/mapper.ts",
     "recommend": "tsx src/cli/recommend.ts",
     "split": "tsx src/cli/split.ts",
     "runner": "tsx src/test-runner.ts",
+    "tiacc:dogfood": "bash scripts/build-self-test-map.sh",
+    "tiacc:build-map": "tsx src/cli/mapper.ts build --coverage-dir tiacc-data/coverage --db tiacc-data/impact_map.db --test-id-from-filename",
+    "tiacc:recommend": "tsx src/cli/recommend.ts --db tiacc-data/impact_map.db",
     "prepublishOnly": "npm run build",
     "postpublish": "echo 'Published successfully!'"
   },
@@ -55,11 +59,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/TiaCC.git"
+    "url": "https://github.com/lusipad/TiaCC.git"
   },
-  "homepage": "https://github.com/your-org/TiaCC#readme",
+  "homepage": "https://github.com/lusipad/TiaCC#readme",
   "bugs": {
-    "url": "https://github.com/your-org/TiaCC/issues"
+    "url": "https://github.com/lusipad/TiaCC/issues"
   },
   "license": "MIT",
   "author": "TiaCC Team",
@@ -74,6 +78,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "^1.6.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^1.2.0"

@@ -21,6 +21,9 @@ npm-debug.log*
 # Test coverage
 coverage/
 
+# TiaCC self-testing data
+tiacc-data/
+
 # Database files (generated)
 *.db
 *.db-journal

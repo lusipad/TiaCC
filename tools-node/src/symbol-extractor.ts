@@ -201,6 +201,7 @@ export class SymbolExtractor {
           // Add methods as symbols
           for (const methodName of Object.keys(classData)) {
             const methodData = classData[methodName];
+            if (!methodData || typeof methodData !== 'object' || !methodData.Lines) continue;
             const lines = Object.keys(methodData.Lines).map(Number);
 
             if (lines.length > 0) {
@@ -455,7 +456,9 @@ export class SymbolExtractor {
     const allLines: number[] = [];
 
     for (const methodName of Object.keys(classData)) {
-      const lines = Object.keys(classData[methodName].Lines).map(Number);
+      const methodData = classData[methodName];
+      if (!methodData || typeof methodData !== 'object' || !methodData.Lines) continue;
+      const lines = Object.keys(methodData.Lines).map(Number);
       allLines.push(...lines);
     }
 
@@ -473,7 +476,9 @@ export class SymbolExtractor {
     let totalHits = 0;
 
     for (const methodName of Object.keys(classData)) {
-      for (const hits of Object.values(classData[methodName].Lines)) {
+      const methodData = classData[methodName];
+      if (!methodData || typeof methodData !== 'object' || !methodData.Lines) continue;
+      for (const hits of Object.values(methodData.Lines)) {
         if (hits > 0) totalHits++;
       }
     }
@@ -488,7 +493,9 @@ export class SymbolExtractor {
     let coveredLines = 0;
 
     for (const methodName of Object.keys(classData)) {
-      const lines = classData[methodName].Lines;
+      const methodData = classData[methodName];
+      if (!methodData || typeof methodData !== 'object' || !methodData.Lines) continue;
+      const lines = methodData.Lines;
       totalLines += Object.keys(lines).length;
       coveredLines += Object.values(lines).filter(h => h > 0).length;
     }
