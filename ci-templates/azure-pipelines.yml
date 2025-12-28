@@ -1,0 +1,159 @@
+# TiaCC Azure Pipelines Template
+# Include this in your azure-pipelines.yml to enable Test Impact Analysis
+#
+# Usage:
+#   resources:
+#     repositories:
+#       - repository: tiacc
+#         type: github
+#         name: your-org/TiaCC
+#         ref: main
+#
+#   stages:
+#     - template: ci-templates/azure-pipelines.yml@tiacc
+#       parameters:
+#         coverageDir: './coverage'
+#         format: 'auto'
+
+parameters:
+  - name: coverageDir
+    type: string
+    default: './coverage'
+  - name: database
+    type: string
+    default: 'impact_map.db'
+  - name: format
+    type: string
+    default: 'auto'
+    values:
+      - auto
+      - cobertura
+      - lcov
+      - jacoco
+      - istanbul
+      - coveragepy
+      - dotcover
+      - opencppcoverage
+  - name: baseBranch
+    type: string
+    default: 'origin/main'
+  - name: verbose
+    type: boolean
+    default: false
+  - name: nodeVersion
+    type: string
+    default: '20.x'
+
+stages:
+  - stage: TiaCC
+    displayName: 'Test Impact Analysis'
+    jobs:
+      # Build job - updates the mapping database
+      - job: Build
+        displayName: 'Build TiaCC Mapping'
+        condition: |
+          or(
+            eq(variables['Build.Reason'], 'Schedule'),
+            eq(variables['Build.SourceBranch'], 'refs/heads/main')
+          )
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: '${{ parameters.nodeVersion }}'
+
+          - task: Cache@2
+            displayName: 'Cache TiaCC Database'
+            inputs:
+              key: 'tiacc | $(Agent.OS)'
+              path: '${{ parameters.database }}'
+              restoreKeys: |
+                tiacc | $(Agent.OS)
+
+          - script: npm install -g @tiacc/tools
+            displayName: 'Install TiaCC'
+
+          - script: |
+              ARGS="build -c ${{ parameters.coverageDir }} -d ${{ parameters.database }}"
+
+              case "${{ parameters.format }}" in
+                lcov) ARGS="$ARGS --lcov" ;;
+                jacoco) ARGS="$ARGS --jacoco" ;;
+                istanbul) ARGS="$ARGS --istanbul" ;;
+                coveragepy) ARGS="$ARGS --coveragepy" ;;
+                dotcover) ARGS="$ARGS --dotcover" ;;
+                opencppcoverage) ARGS="$ARGS --opencppcoverage" ;;
+              esac
+
+              if [ "${{ parameters.verbose }}" = "true" ]; then ARGS="$ARGS -v"; fi
+
+              tia-mapper $ARGS
+            displayName: 'Build TiaCC Mapping'
+
+          - publish: '${{ parameters.database }}'
+            artifact: 'tiacc-database'
+            displayName: 'Publish Database'
+
+      # Recommend job - identifies affected tests for PRs
+      - job: Recommend
+        displayName: 'Recommend Affected Tests'
+        condition: eq(variables['Build.Reason'], 'PullRequest')
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: '${{ parameters.nodeVersion }}'
+
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download TiaCC Database'
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProjectId)'
+              definition: '$(System.DefinitionId)'
+              buildVersionToDownload: 'latest'
+              artifactName: 'tiacc-database'
+              targetPath: '$(Pipeline.Workspace)'
+            continueOnError: true
+
+          - script: |
+              if [ -f "$(Pipeline.Workspace)/${{ parameters.database }}" ]; then
+                cp "$(Pipeline.Workspace)/${{ parameters.database }}" .
+              fi
+            displayName: 'Restore Database'
+
+          - script: npm install -g @tiacc/tools
+            displayName: 'Install TiaCC'
+
+          - script: |
+              if [ ! -f "${{ parameters.database }}" ]; then
+                echo "No TiaCC database found. Running all tests."
+                echo "" > affected-tests.txt
+                exit 0
+              fi
+
+              ARGS="--db ${{ parameters.database }}"
+              ARGS="$ARGS --base origin/$(System.PullRequest.TargetBranch)"
+
+              if [ "${{ parameters.verbose }}" = "true" ]; then ARGS="$ARGS -v"; fi
+
+              tia-recommend $ARGS > affected-tests.txt || true
+
+              echo "=== TiaCC Test Impact Analysis ==="
+              echo "Affected tests:"
+              cat affected-tests.txt
+              echo "=================================="
+            displayName: 'Get Affected Tests'
+
+          - publish: 'affected-tests.txt'
+            artifact: 'tiacc-affected-tests'
+            displayName: 'Publish Affected Tests'
+
+          - script: |
+              AFFECTED=$(cat affected-tests.txt | tr '\n' ',' | sed 's/,$//')
+              echo "##vso[task.setvariable variable=TIACC_AFFECTED_TESTS;isOutput=true]$AFFECTED"
+            name: setvar
+            displayName: 'Set Output Variable'
