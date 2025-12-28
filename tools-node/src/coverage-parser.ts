@@ -2169,6 +2169,341 @@ export class DotCoverCoverageParser extends CoverageParser {
 }
 
 /**
+ * Options for LuaCov parser
+ */
+export interface LuaCovParserOptions {
+  /**
+   * Test ID to use for this coverage file
+   */
+  testId?: string;
+
+  /**
+   * Parse testId from filename
+   */
+  testIdFromFilename?: boolean;
+
+  /**
+   * Base path to strip from source file paths
+   */
+  basePath?: string;
+}
+
+/**
+ * Parser for LuaCov coverage format
+ * LuaCov is the standard coverage tool for Lua, commonly used with LuaUnit test framework.
+ *
+ * Supports two formats:
+ * 1. Stats file (luacov.stats.out): Binary hit counts per file/line
+ * 2. Report file (luacov.report.out): Human-readable report with coverage marks
+ *
+ * Stats file format:
+ * ```
+ * /path/to/file.lua
+ * 1:5
+ * 2:0
+ * 3:10
+ * ```
+ * Where format is line_number:hit_count
+ *
+ * Report file format:
+ * ```
+ * ==============================================================================
+ * /path/to/file.lua
+ * ==============================================================================
+ *         1 local function foo()
+ * *       2   return 1
+ *         3 end
+ * ```
+ * Where * indicates covered lines, numbers on left are hit counts
+ */
+export class LuaCovCoverageParser extends CoverageParser {
+  private options: LuaCovParserOptions;
+
+  constructor(options: LuaCovParserOptions = {}) {
+    super();
+    this.options = options;
+  }
+
+  getFileExtension(): string {
+    return '.out';
+  }
+
+  async parse(coverageFile: string): Promise<CoverageData | null> {
+    if (!existsSync(coverageFile)) {
+      console.error(`Coverage file not found: ${coverageFile}`);
+      return null;
+    }
+
+    try {
+      const content = await readFile(coverageFile, 'utf-8');
+      const filename = basename(coverageFile).toLowerCase();
+
+      // Determine format based on filename and content
+      if (filename.includes('stats') || this.isStatsFormat(content)) {
+        return this.parseStatsFile(coverageFile, content);
+      } else if (filename.includes('report') || this.isReportFormat(content)) {
+        return this.parseReportFile(coverageFile, content);
+      }
+
+      // Try auto-detection
+      if (this.isStatsFormat(content)) {
+        return this.parseStatsFile(coverageFile, content);
+      }
+      if (this.isReportFormat(content)) {
+        return this.parseReportFile(coverageFile, content);
+      }
+
+      console.warn(`Unrecognized LuaCov format: ${coverageFile}`);
+      return null;
+    } catch (error) {
+      console.error(`Error parsing LuaCov coverage file: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Check if content looks like LuaCov stats format
+   */
+  private isStatsFormat(content: string): boolean {
+    const lines = content.split('\n').slice(0, 20);
+    let hasFilePath = false;
+    let hasLineData = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.endsWith('.lua')) {
+        hasFilePath = true;
+      }
+      if (/^\d+:\d+$/.test(trimmed)) {
+        hasLineData = true;
+      }
+    }
+
+    return hasFilePath && hasLineData;
+  }
+
+  /**
+   * Check if content looks like LuaCov report format
+   */
+  private isReportFormat(content: string): boolean {
+    return content.includes('='.repeat(10)) ||
+           content.includes('luacov') ||
+           /^[\s*]\s*\d+\s/.test(content);
+  }
+
+  /**
+   * Parse LuaCov stats file format (luacov.stats.out)
+   */
+  private parseStatsFile(coverageFile: string, content: string): CoverageData {
+    const files: string[] = [];
+    const fileCoverage = new Map<string, number>();
+    const coveredSymbols: CoveredSymbol[] = [];
+    let totalLines = 0;
+    let coveredLines = 0;
+
+    let currentFile = '';
+    let currentFileTotal = 0;
+    let currentFileCovered = 0;
+
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      // Check if this is a file path (ends with .lua)
+      if (trimmed.endsWith('.lua') || (trimmed.includes('/') && !trimmed.includes(':'))) {
+        // Save previous file stats
+        if (currentFile && currentFileCovered > 0) {
+          const normalizedPath = this.normalizeFilePath(currentFile);
+          files.push(normalizedPath);
+          const coveragePct = currentFileTotal > 0
+            ? Math.round((currentFileCovered / currentFileTotal) * 100 * 100) / 100
+            : 0;
+          fileCoverage.set(normalizedPath, coveragePct);
+        }
+        totalLines += currentFileTotal;
+        coveredLines += currentFileCovered;
+
+        // Start new file
+        currentFile = trimmed;
+        currentFileTotal = 0;
+        currentFileCovered = 0;
+        continue;
+      }
+
+      // Check if this is line data (line_number:hit_count)
+      const lineMatch = trimmed.match(/^(\d+):(\d+)$/);
+      if (lineMatch && currentFile) {
+        const hitCount = parseInt(lineMatch[2]);
+        currentFileTotal++;
+        if (hitCount > 0) {
+          currentFileCovered++;
+        }
+      }
+    }
+
+    // Save last file stats
+    if (currentFile && currentFileCovered > 0) {
+      const normalizedPath = this.normalizeFilePath(currentFile);
+      files.push(normalizedPath);
+      const coveragePct = currentFileTotal > 0
+        ? Math.round((currentFileCovered / currentFileTotal) * 100 * 100) / 100
+        : 0;
+      fileCoverage.set(normalizedPath, coveragePct);
+    }
+    totalLines += currentFileTotal;
+    coveredLines += currentFileCovered;
+
+    const testId = this.resolveTestId(coverageFile);
+
+    return {
+      testId,
+      coveredFiles: files.sort(),
+      fileCoverage,
+      coveredSymbols,
+      totalLines,
+      coveredLines,
+    };
+  }
+
+  /**
+   * Parse LuaCov report file format (luacov.report.out)
+   */
+  private parseReportFile(coverageFile: string, content: string): CoverageData {
+    const files: string[] = [];
+    const fileCoverage = new Map<string, number>();
+    const coveredSymbols: CoveredSymbol[] = [];
+    let totalLines = 0;
+    let coveredLines = 0;
+
+    let currentFile = '';
+    let currentFileTotal = 0;
+    let currentFileCovered = 0;
+    let inFileSection = false;
+
+    const lines = content.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Skip empty lines
+      if (!trimmed) continue;
+
+      // Check for separator line (===...)
+      if (trimmed.startsWith('='.repeat(10))) {
+        // Check if next line is a file path
+        const nextLine = lines[i + 1]?.trim() || '';
+        if (nextLine.endsWith('.lua') || (nextLine.includes('/') && nextLine.includes('.'))) {
+          // Save previous file stats
+          if (currentFile && currentFileCovered > 0) {
+            const normalizedPath = this.normalizeFilePath(currentFile);
+            files.push(normalizedPath);
+            const coveragePct = currentFileTotal > 0
+              ? Math.round((currentFileCovered / currentFileTotal) * 100 * 100) / 100
+              : 0;
+            fileCoverage.set(normalizedPath, coveragePct);
+          }
+          totalLines += currentFileTotal;
+          coveredLines += currentFileCovered;
+
+          currentFile = nextLine;
+          currentFileTotal = 0;
+          currentFileCovered = 0;
+          inFileSection = true;
+          i++; // Skip the file path line
+          continue;
+        }
+        continue;
+      }
+
+      // Parse coverage line: [*] count code
+      // Format: "        5 local x = 1" or "*      12 covered line"
+      if (inFileSection && currentFile) {
+        // Match patterns like:
+        // "        5 code" - hit 5 times
+        // "*       0 code" - marked as covered (executed at least once)
+        // "******** code" - heavily covered
+        const coverageMatch = line.match(/^([\s*]*)(\d+|\*+)\s+(.*)$/);
+        if (coverageMatch) {
+          const marker = coverageMatch[1].trim();
+          const countOrMarker = coverageMatch[2];
+
+          // Count as instrumented line
+          currentFileTotal++;
+
+          // Check if covered
+          if (marker === '*' || (countOrMarker !== '0' && /^\d+$/.test(countOrMarker) && parseInt(countOrMarker) > 0)) {
+            currentFileCovered++;
+          } else if (countOrMarker.includes('*')) {
+            // Marker like "****" indicates coverage
+            currentFileCovered++;
+          }
+        }
+      }
+    }
+
+    // Save last file stats
+    if (currentFile && currentFileCovered > 0) {
+      const normalizedPath = this.normalizeFilePath(currentFile);
+      files.push(normalizedPath);
+      const coveragePct = currentFileTotal > 0
+        ? Math.round((currentFileCovered / currentFileTotal) * 100 * 100) / 100
+        : 0;
+      fileCoverage.set(normalizedPath, coveragePct);
+    }
+    totalLines += currentFileTotal;
+    coveredLines += currentFileCovered;
+
+    const testId = this.resolveTestId(coverageFile);
+
+    return {
+      testId,
+      coveredFiles: files.sort(),
+      fileCoverage,
+      coveredSymbols,
+      totalLines,
+      coveredLines,
+    };
+  }
+
+  private normalizeFilePath(filePath: string): string {
+    let normalized = filePath.replace(/\\/g, '/');
+
+    if (this.options.basePath) {
+      const basePath = this.options.basePath.replace(/\\/g, '/');
+      if (normalized.startsWith(basePath)) {
+        normalized = normalized.slice(basePath.length);
+        if (normalized.startsWith('/')) {
+          normalized = normalized.slice(1);
+        }
+      }
+    }
+
+    return normalized;
+  }
+
+  private resolveTestId(coverageFile: string): string {
+    if (this.options.testId) {
+      return this.options.testId;
+    }
+
+    if (this.options.testIdFromFilename) {
+      const filename = basename(coverageFile);
+      // Try to extract test name from filename
+      const match = filename.match(/^(?:luacov[._-])?(?:stats|report)?[._-]?(.+?)\.out$/i);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    // Default: use filename
+    return basename(coverageFile).replace(/\.out$/i, '');
+  }
+}
+
+/**
  * Get appropriate parser for a coverage file
  */
 export function getParserForFile(filePath: string, options?: {
@@ -2180,6 +2515,7 @@ export function getParserForFile(filePath: string, options?: {
   istanbulOptions?: IstanbulParserOptions;
   coveragePyOptions?: CoveragePyParserOptions;
   dotCoverOptions?: DotCoverParserOptions;
+  luaCovOptions?: LuaCovParserOptions;
 }): CoverageParser | null {
   const ext = extname(filePath).toLowerCase();
   const name = basename(filePath).toLowerCase();
@@ -2231,6 +2567,11 @@ export function getParserForFile(filePath: string, options?: {
   // coverage.py format (coverage.json with meta/files structure)
   if (ext === '.json' && name.startsWith('coverage') && !name.includes('.coverage')) {
     return new CoveragePyCoverageParser(options?.coveragePyOptions);
+  }
+
+  // LuaCov format (luacov.stats.out, luacov.report.out, *.out)
+  if (ext === '.out' && (name.includes('luacov') || name.includes('stats') || name.includes('report'))) {
+    return new LuaCovCoverageParser(options?.luaCovOptions);
   }
 
   // Generic XML files - try to auto-detect format

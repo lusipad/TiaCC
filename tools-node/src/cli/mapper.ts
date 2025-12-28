@@ -23,6 +23,7 @@ import {
   IstanbulCoverageParser,
   CoveragePyCoverageParser,
   DotCoverCoverageParser,
+  LuaCovCoverageParser,
 } from '../coverage-parser.js';
 import type {
   CoberturaParserOptions,
@@ -32,6 +33,7 @@ import type {
   IstanbulParserOptions,
   CoveragePyParserOptions,
   DotCoverParserOptions,
+  LuaCovParserOptions,
 } from '../coverage-parser.js';
 import { GitUtils } from '../git-utils.js';
 
@@ -94,6 +96,8 @@ program
   .option('--coveragepy-pattern <pattern>', 'Glob pattern for coverage.py files', 'coverage*.json')
   .option('--dotcover', 'Enable dotCover format support (.NET)')
   .option('--dotcover-pattern <pattern>', 'Glob pattern for dotCover files', 'dotcover*.xml')
+  .option('--luacov', 'Enable LuaCov format support (Lua/LuaUnit)')
+  .option('--luacov-pattern <pattern>', 'Glob pattern for LuaCov files', 'luacov*.out')
   .action(async (options) => {
     const spinner = ora('Initializing...').start();
 
@@ -215,6 +219,17 @@ program
         allCoberturaFiles.push(...filteredCoberturaFiles);
       }
 
+      // LuaCov files (Lua/LuaUnit)
+      let luaCovFiles: string[] = [];
+      if (options.luacov) {
+        luaCovFiles = await glob(options.luacovPattern, { cwd: options.coverageDir });
+        // Also search for common LuaCov output patterns
+        const statsFiles = await glob('**/luacov.stats.out', { cwd: options.coverageDir });
+        const reportFiles = await glob('**/luacov.report.out', { cwd: options.coverageDir });
+        const outFiles = await glob('**/*.luacov.out', { cwd: options.coverageDir });
+        luaCovFiles = [...new Set([...luaCovFiles, ...statsFiles, ...reportFiles, ...outFiles])];
+      }
+
       spinner.info(`Found ${profrawFiles.length} C++ profraw files`);
       spinner.info(`Found ${llvmJsonFiles.length} LLVM JSON files`);
       spinner.info(`Found ${coverletFiles.length} C# coverage files`);
@@ -237,10 +252,14 @@ program
       if (options.dotcover) {
         spinner.info(`Found ${dotCoverFiles.length} dotCover files`);
       }
+      if (options.luacov) {
+        spinner.info(`Found ${luaCovFiles.length} LuaCov files`);
+      }
 
       const totalFiles = profrawFiles.length + llvmJsonFiles.length + coverletFiles.length +
         allCoberturaFiles.length + openCppCoverageFiles.length + lcovFiles.length +
-        jacocoFiles.length + istanbulFiles.length + coveragePyFiles.length + dotCoverFiles.length;
+        jacocoFiles.length + istanbulFiles.length + coveragePyFiles.length + dotCoverFiles.length +
+        luaCovFiles.length;
       if (totalFiles === 0) {
         spinner.warn('No coverage files found.');
         db.close();
@@ -877,6 +896,70 @@ program
         }
 
         spinner.succeed(`Processed ${dotCoverFiles.length} dotCover coverage files`);
+      }
+
+      // Process LuaCov files (Lua/LuaUnit)
+      if (luaCovFiles.length > 0) {
+        spinner.start('Processing LuaCov coverage files...');
+
+        const luaCovOptions: LuaCovParserOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+          basePath: options.basePath,
+        };
+        const luaCovParser = new LuaCovCoverageParser(luaCovOptions);
+
+        for (let i = 0; i < luaCovFiles.length; i++) {
+          const file = luaCovFiles[i];
+          spinner.text = `Processing LuaCov [${i + 1}/${luaCovFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await luaCovParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${luaCovFiles.length} LuaCov coverage files`);
       }
 
       // Record run metadata

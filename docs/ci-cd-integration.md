@@ -235,6 +235,7 @@ For Windows agents and classic builds, see PowerShell scripts in `ci-templates/a
 | `coveragepy` | coverage.py (Python) | `coverage.json` |
 | `dotcover` | dotCover (.NET) | `dotcover*.xml` |
 | `opencppcoverage` | OpenCppCoverage (C++) | `CoverageReport*.xml` |
+| `luacov` | LuaCov (Lua/LuaUnit) | `luacov*.out` |
 
 ## Language-Specific Examples
 
@@ -424,6 +425,58 @@ jobs:
             ctest --test-dir build -R "$(cat affected-tests.txt | tr '\n' '|' | sed 's/|$//')"
           else
             ctest --test-dir build
+          fi
+```
+
+### Lua (LuaUnit + LuaCov)
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Lua and LuaCov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.3 luarocks
+          luarocks install luaunit
+          luarocks install luacov
+
+      # Main branch: run with coverage
+      - name: Run all tests (main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          lua -lluacov tests/run_all.lua
+          luacov
+
+      - uses: tiacc/action@v1
+        if: github.ref == 'refs/heads/main'
+        with:
+          mode: build
+          format: luacov
+          coverage-dir: .
+
+      # PR: run affected tests
+      - uses: tiacc/action@v1
+        if: github.event_name == 'pull_request'
+        id: tiacc
+        with:
+          mode: recommend
+
+      - name: Run affected tests (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -f "affected-tests.txt" ] && [ -s "affected-tests.txt" ]; then
+            # Run specific test files
+            for test in $(cat affected-tests.txt); do
+              lua "$test"
+            done
+          else
+            lua tests/run_all.lua
           fi
 ```
 
