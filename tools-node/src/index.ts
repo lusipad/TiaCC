@@ -30,7 +30,8 @@ export type {
 
 // ============ Low-level components ============
 export { Database, initDatabase } from './database.js';
-export { CoverageParser, CppCoverageParser, CSharpCoverageParser, LlvmJsonCoverageParser, getParserForFile } from './coverage-parser.js';
+export { CoverageParser, CppCoverageParser, CSharpCoverageParser, LlvmJsonCoverageParser, OpenCppCoverageParser, CoberturaCoverageParser, getParserForFile } from './coverage-parser.js';
+export type { CoberturaParserOptions, OpenCppCoverageOptions } from './coverage-parser.js';
 export { GitUtils } from './git-utils.js';
 export { SymbolExtractor } from './symbol-extractor.js';
 export type { CoverageData, SourceFile, TestScript, CoverageMapping, DbStats } from './types.js';

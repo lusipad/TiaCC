@@ -787,11 +787,316 @@ export class CoberturaCoverageParser extends CoverageParser {
 }
 
 /**
+ * Options for OpenCppCoverage parser
+ */
+export interface OpenCppCoverageOptions {
+  /**
+   * Test ID to use for this coverage file
+   */
+  testId?: string;
+
+  /**
+   * Parse testId from filename format
+   */
+  testIdFromFilename?: boolean;
+
+  /**
+   * Base path to strip from source file paths
+   */
+  basePath?: string;
+}
+
+/**
+ * Parser for OpenCppCoverage binary format (.cov files)
+ * OpenCppCoverage is a Windows C++ code coverage tool.
+ *
+ * Note: OpenCppCoverage can also export to Cobertura XML format,
+ * which is handled by CoberturaCoverageParser.
+ *
+ * This parser handles the native binary format and merged coverage files.
+ */
+export class OpenCppCoverageParser extends CoverageParser {
+  private options: OpenCppCoverageOptions;
+  private xmlParser: XMLParser;
+
+  constructor(options: OpenCppCoverageOptions = {}) {
+    super();
+    this.options = options;
+    this.xmlParser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+      allowBooleanAttributes: true,
+      parseAttributeValue: false,
+    });
+  }
+
+  getFileExtension(): string {
+    return '.xml';
+  }
+
+  async parse(coverageFile: string): Promise<CoverageData | null> {
+    if (!existsSync(coverageFile)) {
+      console.error(`Coverage file not found: ${coverageFile}`);
+      return null;
+    }
+
+    try {
+      const content = await readFile(coverageFile, 'utf-8');
+
+      // Check if this is a Cobertura XML (OpenCppCoverage export format)
+      if (content.includes('<coverage') && content.includes('line-rate')) {
+        return this.parseCobertura(coverageFile, content);
+      }
+
+      // Check if this is OpenCppCoverage HTML format summary
+      if (content.includes('OpenCppCoverage')) {
+        return this.parseOpenCppCoverageHtml(coverageFile, content);
+      }
+
+      console.warn(`Unrecognized OpenCppCoverage format: ${coverageFile}`);
+      return null;
+    } catch (error) {
+      console.error(`Error parsing OpenCppCoverage file: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Parse Cobertura XML exported from OpenCppCoverage
+   */
+  private async parseCobertura(coverageFile: string, content: string): Promise<CoverageData | null> {
+    const parsed = this.xmlParser.parse(content) as CoberturaXml;
+
+    if (!parsed.coverage) {
+      return null;
+    }
+
+    const testId = this.resolveTestId(coverageFile);
+    const { coveredFiles, fileCoverage, totalLines, coveredLines, coveredSymbols } =
+      this.extractCoverageData(parsed);
+
+    return {
+      testId,
+      coveredFiles,
+      fileCoverage,
+      coveredSymbols,
+      totalLines,
+      coveredLines,
+    };
+  }
+
+  /**
+   * Parse OpenCppCoverage HTML report to extract coverage data
+   * This is a fallback for when only HTML output is available
+   */
+  private parseOpenCppCoverageHtml(coverageFile: string, content: string): CoverageData | null {
+    // Extract basic coverage info from HTML
+    // This is a simplified parser - prefer Cobertura XML export when available
+    const testId = this.resolveTestId(coverageFile);
+
+    const coveredFiles: string[] = [];
+    const fileCoverage = new Map<string, number>();
+
+    // Try to extract file coverage from HTML
+    // Pattern: <td class="filename">path/to/file.cpp</td>
+    const filePattern = /<td[^>]*class="[^"]*filename[^"]*"[^>]*>([^<]+)<\/td>/g;
+    const coveragePattern = /<td[^>]*class="[^"]*coverage[^"]*"[^>]*>(\d+(?:\.\d+)?)\s*%<\/td>/g;
+
+    let fileMatch;
+    const files: string[] = [];
+    while ((fileMatch = filePattern.exec(content)) !== null) {
+      files.push(this.normalizePath(fileMatch[1]));
+    }
+
+    let coverageMatch;
+    const coverages: number[] = [];
+    while ((coverageMatch = coveragePattern.exec(content)) !== null) {
+      coverages.push(parseFloat(coverageMatch[1]));
+    }
+
+    // Match files with coverages
+    for (let i = 0; i < Math.min(files.length, coverages.length); i++) {
+      if (coverages[i] > 0) {
+        coveredFiles.push(files[i]);
+        fileCoverage.set(files[i], coverages[i]);
+      }
+    }
+
+    return {
+      testId,
+      coveredFiles,
+      fileCoverage,
+      totalLines: 0,
+      coveredLines: 0,
+    };
+  }
+
+  private resolveTestId(coverageFile: string): string {
+    if (this.options.testId) {
+      return this.options.testId;
+    }
+
+    if (this.options.testIdFromFilename) {
+      const testId = this.extractTestIdFromFilename(coverageFile);
+      if (testId) {
+        return testId;
+      }
+    }
+
+    // Default: use filename without extension
+    return basename(coverageFile).replace(/\.(cobertura\.)?xml$/i, '').replace(/\.html?$/i, '');
+  }
+
+  private extractTestIdFromFilename(coverageFile: string): string | null {
+    const filename = basename(coverageFile);
+
+    // Match pattern: Test_ClassName__test_methodName.xml
+    const pattern = /^Test_([^_]+(?:_[^_]+)*)__(.+?)(?:\.cobertura)?\.xml$/i;
+    const match = filename.match(pattern);
+
+    if (match) {
+      const className = match[1];
+      const methodName = match[2];
+      return `${className}::${methodName}`;
+    }
+
+    // Match pattern: coverage_TestName.xml
+    const altPattern = /^coverage[_-](.+?)\.xml$/i;
+    const altMatch = filename.match(altPattern);
+    if (altMatch) {
+      return altMatch[1];
+    }
+
+    return null;
+  }
+
+  private extractCoverageData(parsed: CoberturaXml): {
+    coveredFiles: string[];
+    fileCoverage: Map<string, number>;
+    totalLines: number;
+    coveredLines: number;
+    coveredSymbols: CoveredSymbol[];
+  } {
+    const files: string[] = [];
+    const fileCoverage = new Map<string, number>();
+    const coveredSymbols: CoveredSymbol[] = [];
+    let totalLines = 0;
+    let coveredLines = 0;
+
+    const packages = parsed.coverage.packages?.package;
+    if (!packages) {
+      return { coveredFiles: files, fileCoverage, totalLines, coveredLines, coveredSymbols };
+    }
+
+    const packageList = Array.isArray(packages) ? packages : [packages];
+
+    for (const pkg of packageList) {
+      const classes = pkg.classes?.class;
+      if (!classes) continue;
+
+      const classList = Array.isArray(classes) ? classes : [classes];
+
+      for (const cls of classList) {
+        let filename = cls['@_filename'];
+
+        // Normalize Windows paths and apply base path stripping
+        filename = this.normalizePath(filename);
+        if (this.options.basePath) {
+          const basePath = this.normalizePath(this.options.basePath);
+          if (filename.startsWith(basePath)) {
+            filename = filename.slice(basePath.length);
+            if (filename.startsWith('/')) {
+              filename = filename.slice(1);
+            }
+          }
+        }
+
+        const lineRate = parseFloat(cls['@_line-rate'] ?? '0');
+
+        // Process class-level lines
+        const classLines = this.extractLines(cls.lines);
+        const classTotal = classLines.length;
+        const classCovered = classLines.filter(l => parseInt(l['@_hits']) > 0).length;
+
+        // Add class as symbol
+        if (classLines.length > 0) {
+          const lineNumbers = classLines.map(l => parseInt(l['@_number']));
+          coveredSymbols.push({
+            filePath: filename,
+            name: cls['@_name'],
+            type: 'class',
+            startLine: Math.min(...lineNumbers),
+            endLine: Math.max(...lineNumbers),
+            hitCount: classCovered,
+            lineCoveragePct: lineRate * 100,
+          });
+        }
+
+        // Process methods
+        const methods = cls.methods?.method;
+        if (methods) {
+          const methodList = Array.isArray(methods) ? methods : [methods];
+
+          for (const method of methodList) {
+            const methodLines = this.extractLines(method.lines);
+            const methodTotal = methodLines.length;
+            const methodCovered = methodLines.filter(l => parseInt(l['@_hits']) > 0).length;
+            const methodLineRate = parseFloat(method['@_line-rate'] ?? '0');
+
+            if (methodLines.length > 0) {
+              const lineNumbers = methodLines.map(l => parseInt(l['@_number']));
+              coveredSymbols.push({
+                filePath: filename,
+                name: `${cls['@_name']}::${method['@_name']}`,
+                type: 'method',
+                startLine: Math.min(...lineNumbers),
+                endLine: Math.max(...lineNumbers),
+                hitCount: methodCovered,
+                lineCoveragePct: methodLineRate * 100,
+              });
+            }
+
+            totalLines += methodTotal;
+            coveredLines += methodCovered;
+          }
+        }
+
+        // If no methods, count class lines directly
+        if (!methods || (Array.isArray(methods) ? methods.length === 0 : false)) {
+          totalLines += classTotal;
+          coveredLines += classCovered;
+        }
+
+        // Track file coverage
+        if (!fileCoverage.has(filename)) {
+          files.push(filename);
+          fileCoverage.set(filename, Math.round(lineRate * 100 * 100) / 100);
+        }
+      }
+    }
+
+    return { coveredFiles: files.sort(), fileCoverage, totalLines, coveredLines, coveredSymbols };
+  }
+
+  private extractLines(linesData?: { line: CoberturaLine | CoberturaLine[] }): CoberturaLine[] {
+    if (!linesData?.line) {
+      return [];
+    }
+    return Array.isArray(linesData.line) ? linesData.line : [linesData.line];
+  }
+
+  private normalizePath(path: string): string {
+    return path.replace(/\\/g, '/');
+  }
+}
+
+/**
  * Get appropriate parser for a coverage file
  */
 export function getParserForFile(filePath: string, options?: {
   executable?: string;
   coberturaOptions?: CoberturaParserOptions;
+  openCppCoverageOptions?: OpenCppCoverageOptions;
 }): CoverageParser | null {
   const ext = extname(filePath).toLowerCase();
   const name = basename(filePath).toLowerCase();
@@ -812,6 +1117,17 @@ export function getParserForFile(filePath: string, options?: {
 
   // Cobertura XML format (*.cobertura.xml or *.xml with cobertura in name)
   if (ext === '.xml' && (name.includes('cobertura') || name.includes('coverage'))) {
+    return new CoberturaCoverageParser(options?.coberturaOptions);
+  }
+
+  // OpenCppCoverage format (CoverageReport*.xml or opencppcoverage*.xml)
+  if (ext === '.xml' && (name.includes('coveragereport') || name.includes('opencppcoverage'))) {
+    return new OpenCppCoverageParser(options?.openCppCoverageOptions);
+  }
+
+  // Generic XML files - try to auto-detect format
+  if (ext === '.xml') {
+    // Will be handled by caller with content inspection
     return new CoberturaCoverageParser(options?.coberturaOptions);
   }
 

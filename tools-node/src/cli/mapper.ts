@@ -12,8 +12,8 @@ import ora from 'ora';
 import * as fs from 'fs';
 import * as path from 'path';
 import { initDatabase } from '../database.js';
-import { CppCoverageParser, CSharpCoverageParser, LlvmJsonCoverageParser, CoberturaCoverageParser } from '../coverage-parser.js';
-import type { CoberturaParserOptions } from '../coverage-parser.js';
+import { CppCoverageParser, CSharpCoverageParser, LlvmJsonCoverageParser, CoberturaCoverageParser, OpenCppCoverageParser } from '../coverage-parser.js';
+import type { CoberturaParserOptions, OpenCppCoverageOptions } from '../coverage-parser.js';
 import { GitUtils } from '../git-utils.js';
 
 const program = new Command();
@@ -63,6 +63,8 @@ program
   .option('--test-id-from-env <varName>', 'Read testId from environment variable (for Cobertura files)')
   .option('--test-id-from-source', 'Read testId from <source> tag in Cobertura XML (for LuaUnit integration)')
   .option('--test-id-from-filename', 'Parse testId from filename format: Test_ClassName__test_methodName.cobertura.xml')
+  .option('--opencppcoverage', 'Enable OpenCppCoverage format support (CoverageReport*.xml)')
+  .option('--opencppcoverage-pattern <pattern>', 'Glob pattern for OpenCppCoverage files', 'CoverageReport*.xml')
   .action(async (options) => {
     const spinner = ora('Initializing...').start();
 
@@ -107,12 +109,30 @@ program
       // Merge and deduplicate Cobertura files
       const allCoberturaFiles = [...new Set([...coberturaFiles, ...coberturaXmlFiles])];
 
+      // OpenCppCoverage files
+      let openCppCoverageFiles: string[] = [];
+      if (options.opencppcoverage) {
+        openCppCoverageFiles = await glob(options.opencppcoveragePattern, { cwd: options.coverageDir });
+        // Also search in subdirectories (OpenCppCoverage creates CoverageReport-* directories)
+        const subDirFiles = await glob('**/CoverageReport*/*.xml', { cwd: options.coverageDir });
+        openCppCoverageFiles = [...new Set([...openCppCoverageFiles, ...subDirFiles])];
+        // Exclude from Cobertura files to avoid double processing
+        const openCppSet = new Set(openCppCoverageFiles);
+        const filteredCoberturaFiles = allCoberturaFiles.filter(f => !openCppSet.has(f));
+        allCoberturaFiles.length = 0;
+        allCoberturaFiles.push(...filteredCoberturaFiles);
+      }
+
       spinner.info(`Found ${profrawFiles.length} C++ profraw files`);
       spinner.info(`Found ${llvmJsonFiles.length} LLVM JSON files`);
       spinner.info(`Found ${coverletFiles.length} C# coverage files`);
       spinner.info(`Found ${allCoberturaFiles.length} Cobertura XML files`);
+      if (options.opencppcoverage) {
+        spinner.info(`Found ${openCppCoverageFiles.length} OpenCppCoverage files`);
+      }
 
-      if (profrawFiles.length === 0 && llvmJsonFiles.length === 0 && coverletFiles.length === 0 && allCoberturaFiles.length === 0) {
+      const totalFiles = profrawFiles.length + llvmJsonFiles.length + coverletFiles.length + allCoberturaFiles.length + openCppCoverageFiles.length;
+      if (totalFiles === 0) {
         spinner.warn('No coverage files found.');
         db.close();
         return;
@@ -362,6 +382,73 @@ program
         }
 
         spinner.succeed(`Processed ${allCoberturaFiles.length} Cobertura XML coverage files`);
+      }
+
+      // Process OpenCppCoverage files
+      if (openCppCoverageFiles.length > 0) {
+        spinner.start('Processing OpenCppCoverage files...');
+
+        // Build OpenCppCoverage parser options
+        const openCppOptions: OpenCppCoverageOptions = {
+          testIdFromFilename: options.testIdFromFilename,
+          basePath: options.basePath,
+        };
+        const openCppParser = new OpenCppCoverageParser(openCppOptions);
+
+        for (let i = 0; i < openCppCoverageFiles.length; i++) {
+          const file = openCppCoverageFiles[i];
+          spinner.text = `Processing OpenCppCoverage [${i + 1}/${openCppCoverageFiles.length}]: ${file}`;
+
+          const coveragePath = `${options.coverageDir}/${file}`;
+          const data = await openCppParser.parse(coveragePath);
+
+          if (data) {
+            totalTests++;
+            const testId = db.upsertTestScript(data.testId);
+
+            const coveragePct = data.totalLines > 0
+              ? (data.coveredLines / data.totalLines) * 100
+              : 0;
+
+            // File-level mappings
+            for (const sourcePath of data.coveredFiles) {
+              const normalizedPath = normalizePath(sourcePath);
+              const sourceId = db.upsertSourceFile(normalizedPath);
+              const fileCoveragePct = data.fileCoverage?.get(sourcePath) ?? coveragePct;
+              db.addCoverageMapping(sourceId, testId, fileCoveragePct);
+              totalSources.add(normalizedPath);
+            }
+
+            // Symbol-level mappings (classes/methods)
+            if (data.coveredSymbols && data.coveredSymbols.length > 0) {
+              for (const sym of data.coveredSymbols) {
+                const normalizedPath = normalizePath(sym.filePath);
+                const sourceId = db.upsertSourceFile(normalizedPath);
+                const symbolId = db.upsertSymbol(
+                  sourceId,
+                  sym.name,
+                  sym.startLine,
+                  sym.endLine,
+                  sym.type
+                );
+                db.addSymbolCoverage(
+                  symbolId,
+                  testId,
+                  sym.hitCount,
+                  sym.lineCoveragePct ?? 0
+                );
+                totalSymbols++;
+              }
+            }
+
+            if (options.verbose) {
+              const symCount = data.coveredSymbols?.length ?? 0;
+              console.log(`  ${data.testId}: ${data.coveredFiles.length} files, ${symCount} symbols`);
+            }
+          }
+        }
+
+        spinner.succeed(`Processed ${openCppCoverageFiles.length} OpenCppCoverage files`);
       }
 
       // Record run metadata

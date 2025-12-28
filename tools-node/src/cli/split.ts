@@ -119,6 +119,34 @@ interface TestCoverage {
   files: TestFileCoverage;
 }
 
+// Predefined marker patterns for common tools
+const MARKER_PRESETS: Record<string, { start: string; end: string }> = {
+  default: {
+    start: '\\[COVERAGE_START\\]\\s*(\\S+)',
+    end: '\\[COVERAGE_END\\]\\s*(\\S+)',
+  },
+  opencppcoverage: {
+    // OpenCppCoverage style: [TEST] TestClass::test_method START/END
+    start: '\\[TEST\\]\\s*(\\S+)\\s+START',
+    end: '\\[TEST\\]\\s*(\\S+)\\s+END',
+  },
+  gtest: {
+    // Google Test style: [ RUN      ] TestCase.TestName / [       OK ] TestCase.TestName
+    start: '\\[\\s*RUN\\s*\\]\\s*(\\S+)',
+    end: '\\[\\s*(?:OK|FAILED)\\s*\\]\\s*(\\S+)',
+  },
+  catch2: {
+    // Catch2 style: TestCase: test_name - START/PASSED/FAILED
+    start: '(\\S+):.*-\\s*START',
+    end: '(\\S+):.*-\\s*(?:PASSED|FAILED)',
+  },
+  ctest: {
+    // CTest style: test N/M TestName ... START/Passed/Failed
+    start: 'test\\s+\\d+/\\d+\\s+(\\S+).*Start',
+    end: '\\d+/\\d+\\s+Test\\s+#\\d+:\\s+(\\S+)\\s+\\.+\\s+(?:Passed|Failed)',
+  },
+};
+
 program
   .name('tia-split')
   .description('按测试用例拆分覆盖率文件')
@@ -127,9 +155,11 @@ program
   .requiredOption('--markers <file>', '包含覆盖率标记的日志文件')
   .requiredOption('--output-dir <dir>', '输出目录')
   .option('--verbose', '详细输出')
-  .option('--marker-start <pattern>', '开始标记模式', '\\[COVERAGE_START\\]\\s*(\\S+)')
-  .option('--marker-end <pattern>', '结束标记模式', '\\[COVERAGE_END\\]\\s*(\\S+)')
+  .option('--preset <name>', '使用预定义的标记模式 (default, opencppcoverage, gtest, catch2, ctest)', 'default')
+  .option('--marker-start <pattern>', '开始标记模式 (覆盖预设)')
+  .option('--marker-end <pattern>', '结束标记模式 (覆盖预设)')
   .option('--cumulative', '累积模式：每个测试包含之前所有测试的覆盖率差值', false)
+  .option('--opencppcoverage', '使用 OpenCppCoverage 预设标记模式', false)
   .action(async (options) => {
     const spinner = ora('初始化...').start();
 
@@ -142,6 +172,27 @@ program
         throw new Error(`标记文件不存在: ${options.markers}`);
       }
 
+      // Resolve marker patterns from preset or custom options
+      let presetName = options.preset || 'default';
+      if (options.opencppcoverage) {
+        presetName = 'opencppcoverage';
+      }
+
+      const preset = MARKER_PRESETS[presetName];
+      if (!preset && !options.markerStart) {
+        throw new Error(`未知的预设: ${presetName}. 可用预设: ${Object.keys(MARKER_PRESETS).join(', ')}`);
+      }
+
+      // Custom patterns override preset
+      const markerStart = options.markerStart || preset?.start || MARKER_PRESETS.default.start;
+      const markerEnd = options.markerEnd || preset?.end || MARKER_PRESETS.default.end;
+
+      if (options.verbose) {
+        spinner.info(`使用标记预设: ${presetName}`);
+        spinner.info(`开始标记模式: ${markerStart}`);
+        spinner.info(`结束标记模式: ${markerEnd}`);
+      }
+
       // Create output directory
       if (!existsSync(options.outputDir)) {
         await mkdir(options.outputDir, { recursive: true });
@@ -152,7 +203,8 @@ program
 
       // Step 1: Parse markers file
       spinner.text = '解析覆盖率标记...';
-      const markers = await parseMarkers(options.markers, options);
+      const markerOptions = { ...options, markerStart, markerEnd };
+      const markers = await parseMarkers(options.markers, markerOptions);
 
       if (markers.length === 0) {
         spinner.warn('未找到覆盖率标记');
