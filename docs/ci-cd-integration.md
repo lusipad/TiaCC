@@ -546,11 +546,61 @@ copyArtifacts(
     artifactName: 'tiacc-database'
 ```
 
+## Incremental Updates
+
+TiaCC supports incremental updates to avoid rebuilding the entire mapping database when only some tests have changed.
+
+### How It Works
+
+1. TiaCC tracks which coverage files have been processed and their modification times
+2. On subsequent runs, only new or modified coverage files are processed
+3. Old mappings for updated tests are automatically replaced
+
+### Usage
+
+```bash
+# Incremental update - only process changed coverage files
+tia-mapper update -c ./coverage -d impact_map.db
+
+# With specific format
+tia-mapper update -c ./coverage --istanbul
+
+# Clean up deleted coverage files
+tia-mapper update -c ./coverage --purge
+
+# Verbose output to see what's being processed
+tia-mapper update -c ./coverage -v
+```
+
+### CI/CD Integration
+
+```yaml
+# GitHub Actions - use update instead of build for faster runs
+- name: Update TiaCC mapping
+  run: tia-mapper update -c ./coverage -d impact_map.db --istanbul
+
+# Only run full build weekly, use update for daily
+- name: TiaCC mapping
+  run: |
+    if [ "${{ github.event.schedule }}" = "0 0 * * 0" ]; then
+      tia-mapper build -c ./coverage -d impact_map.db --istanbul
+    else
+      tia-mapper update -c ./coverage -d impact_map.db --istanbul
+    fi
+```
+
+### Benefits
+
+- **Faster CI**: Only process changed coverage files instead of all files
+- **Less I/O**: Reduced disk and database operations
+- **Accurate tracking**: Modified tests automatically update their mappings
+- **Cleanup**: `--purge` option removes mappings for deleted tests
+
 ## Best Practices
 
 1. **Nightly Builds**: Run full test suites with coverage collection nightly to keep the mapping database up to date.
 
-2. **Incremental Updates**: Consider updating the database on each main branch push for more accurate mappings.
+2. **Incremental Updates**: Use `tia-mapper update` for faster daily updates instead of full rebuilds.
 
 3. **Fallback Strategy**: Always have a fallback to run all tests if TiaCC cannot determine affected tests.
 

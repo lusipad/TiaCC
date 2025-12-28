@@ -108,6 +108,22 @@ CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
 CREATE INDEX IF NOT EXISTS idx_symbols_lines ON symbols(source_file_id, start_line, end_line);
 CREATE INDEX IF NOT EXISTS idx_symbol_coverage_symbol ON symbol_coverage(symbol_id);
 CREATE INDEX IF NOT EXISTS idx_symbol_coverage_test ON symbol_coverage(test_script_id);
+
+-- ============ Incremental Update tables (Phase 3) ============
+
+-- Track processed coverage files for incremental updates
+CREATE TABLE IF NOT EXISTS processed_files (
+    id INTEGER PRIMARY KEY,
+    file_path TEXT UNIQUE NOT NULL,
+    file_hash TEXT,
+    file_mtime INTEGER,
+    test_script_id INTEGER,
+    processed_at TEXT,
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_processed_files_path ON processed_files(file_path);
+CREATE INDEX IF NOT EXISTS idx_processed_files_test ON processed_files(test_script_id);
 `;
 
 export class TiaDatabase {
@@ -756,6 +772,156 @@ export class TiaDatabase {
     });
 
     insertMany(mappings);
+  }
+
+  // ============ Incremental Update Operations (Phase 3) ============
+
+  /**
+   * Check if a coverage file needs to be processed
+   * Returns true if the file is new or has been modified
+   */
+  needsProcessing(filePath: string, fileMtime: number, fileHash?: string): boolean {
+    const stmt = this.db.prepare(`
+      SELECT file_mtime, file_hash FROM processed_files WHERE file_path = ?
+    `);
+    const row = stmt.get(filePath) as { file_mtime: number; file_hash: string | null } | undefined;
+
+    if (!row) {
+      return true; // New file
+    }
+
+    // Check modification time first (fast)
+    if (row.file_mtime !== fileMtime) {
+      return true;
+    }
+
+    // Optionally check hash for extra certainty
+    if (fileHash && row.file_hash && row.file_hash !== fileHash) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Record that a coverage file has been processed
+   */
+  recordProcessedFile(
+    filePath: string,
+    testScriptId: number,
+    fileMtime: number,
+    fileHash?: string
+  ): void {
+    const now = new Date().toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO processed_files
+      (file_path, file_hash, file_mtime, test_script_id, processed_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    stmt.run(filePath, fileHash ?? null, fileMtime, testScriptId, now);
+  }
+
+  /**
+   * Get the test script ID for a processed coverage file
+   */
+  getTestIdForProcessedFile(filePath: string): number | null {
+    const stmt = this.db.prepare(`
+      SELECT test_script_id FROM processed_files WHERE file_path = ?
+    `);
+    const row = stmt.get(filePath) as { test_script_id: number } | undefined;
+    return row?.test_script_id ?? null;
+  }
+
+  /**
+   * Delete all mappings for a specific test script
+   * Used before re-processing a test's coverage
+   */
+  deleteMappingsForTest(testScriptId: number): void {
+    const stmt = this.db.prepare(`
+      DELETE FROM coverage_map WHERE test_script_id = ?
+    `);
+    stmt.run(testScriptId);
+  }
+
+  /**
+   * Delete all symbol coverage for a specific test script
+   */
+  deleteSymbolCoverageForTest(testScriptId: number): void {
+    const stmt = this.db.prepare(`
+      DELETE FROM symbol_coverage WHERE test_script_id = ?
+    `);
+    stmt.run(testScriptId);
+  }
+
+  /**
+   * Clear all mappings for a test before re-processing
+   */
+  clearTestMappings(testScriptId: number): void {
+    this.deleteMappingsForTest(testScriptId);
+    this.deleteSymbolCoverageForTest(testScriptId);
+  }
+
+  /**
+   * Get all processed files for a given test
+   */
+  getProcessedFilesForTest(testScriptId: number): string[] {
+    const stmt = this.db.prepare(`
+      SELECT file_path FROM processed_files WHERE test_script_id = ?
+    `);
+    const rows = stmt.all(testScriptId) as { file_path: string }[];
+    return rows.map(r => r.file_path);
+  }
+
+  /**
+   * Remove processed file record
+   */
+  removeProcessedFile(filePath: string): void {
+    const stmt = this.db.prepare(`
+      DELETE FROM processed_files WHERE file_path = ?
+    `);
+    stmt.run(filePath);
+  }
+
+  /**
+   * Get incremental update statistics
+   */
+  getIncrementalStats(): { processedFiles: number; lastProcessedAt: string | null } {
+    const countStmt = this.db.prepare('SELECT COUNT(*) as cnt FROM processed_files');
+    const count = (countStmt.get() as { cnt: number }).cnt;
+
+    const lastStmt = this.db.prepare(
+      'SELECT processed_at FROM processed_files ORDER BY processed_at DESC LIMIT 1'
+    );
+    const lastRow = lastStmt.get() as { processed_at: string } | undefined;
+
+    return {
+      processedFiles: count,
+      lastProcessedAt: lastRow?.processed_at ?? null,
+    };
+  }
+
+  /**
+   * Purge orphaned records (coverage files that no longer exist)
+   */
+  purgeOrphanedRecords(existingFiles: Set<string>): number {
+    const allProcessed = this.db.prepare('SELECT file_path FROM processed_files').all() as { file_path: string }[];
+
+    let purged = 0;
+    for (const { file_path } of allProcessed) {
+      if (!existingFiles.has(file_path)) {
+        // Get test ID before removing
+        const testId = this.getTestIdForProcessedFile(file_path);
+        if (testId) {
+          // Remove all mappings for this test
+          this.clearTestMappings(testId);
+        }
+        this.removeProcessedFile(file_path);
+        purged++;
+      }
+    }
+
+    return purged;
   }
 }
 
