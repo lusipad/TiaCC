@@ -118,30 +118,31 @@ failure_correlations (source_file_id, test_script_id, correlation_score, failure
 **方式 1: 使用 API**
 
 ```typescript
-import { TiaCC } from '@tiacc/tools';
+import { initDatabase } from '@tiacc/tools';
 
-const tia = await TiaCC.init('./impact_map.db');
+// 注意：TiaCC 高层 API 暂未暴露此方法，使用底层 Database API
+const db = initDatabase('./impact_map.db');
 
-// 测试执行后记录结果
-await tia.recordTestResult({
-  testPath: 'tests/test_calculator.cpp',
-  passed: true,
-  durationMs: 1250,
-  commitHash: await git.getCurrentCommitHash(),
-  changedFiles: ['src/calculator.cpp', 'src/math_utils.cpp']
-});
+// 记录测试执行结果
+db.recordTestResult(
+  'tests/test_calculator.cpp',  // testPath
+  true,                           // passed
+  1250,                           // durationMs
+  'abc123',                       // commitHash
+  ['src/calculator.cpp', 'src/math_utils.cpp']  // changedFiles
+);
 ```
 
-**方式 2: 使用 CLI（待实现）**
+**方式 2: 使用 CLI（计划中）**
 
 ```bash
-# 记录测试结果
-tia-mapper record-test \
-  --db impact_map.db \
-  --test tests/test_calculator.cpp \
-  --status pass \
-  --duration 1250 \
-  --commit abc123
+# 注意：此功能尚未实现，计划在未来版本中提供
+# tia-mapper record-test \
+#   --db impact_map.db \
+#   --test tests/test_calculator.cpp \
+#   --status pass \
+#   --duration 1250 \
+#   --commit abc123
 ```
 
 ### 2.4 查看失败预测
@@ -186,19 +187,31 @@ tia-recommend --db impact_map.db --flaky
 #   - Review tests failing on specific files (shown below)
 ```
 
-### 3.3 关联分析
+### 3.3 关联分析（计划中）
+
+> ⚠️ **注意**：`--show-correlations` 选项尚未实现，计划在未来版本中提供
 
 ```bash
-# 查看特定文件变更时哪些测试最易失败
-tia-mapper query src/database.cpp --db impact_map.db --show-correlations
+# 查看特定文件变更时哪些测试最易失败（功能开发中）
+# tia-mapper query src/database.cpp --db impact_map.db --show-correlations
 
-# 输出示例:
+# 预期输出示例:
 # Tests covering src/database.cpp:
 #   1. test_transaction_commit     [Coverage: 85%, Failures: 12/50, Correlation: 0.78]
 #   2. test_connection_pool        [Coverage: 62%, Failures: 5/50, Correlation: 0.45]
 #   3. test_query_builder          [Coverage: 91%, Failures: 2/50, Correlation: 0.12]
 #
 # High correlation (>0.7) indicates this file change frequently causes test failure
+```
+
+**当前可用的替代方案**：
+
+```bash
+# 查询文件覆盖的测试
+tia-mapper query src/database.cpp --db impact_map.db
+
+# 使用智能推荐查看失败预测
+tia-recommend --db impact_map.db --smart --show-probability
 ```
 
 ---
@@ -259,15 +272,28 @@ while IFS= read -r method; do
 done < test_methods.txt
 ```
 
-**示例: JUnit (Java)**
+**示例: JUnit (Java)（计划中）**
+
+> ⚠️ **注意**：`--format junit` 选项尚未实现，当前需要手动转换格式
 
 ```bash
-# 生成测试方法列表（格式: ClassName#methodName）
-tia-recommend --db impact_map.db --methods --quiet --format junit > test_methods.txt
+# 生成测试方法列表
+tia-recommend --db impact_map.db --methods --quiet > test_methods.txt
+
+# 手动转换为 JUnit 格式（ClassName#methodName）
+# 或使用 sed/awk 脚本转换格式
 
 # 使用 JUnit ConsoleLauncher 运行
-java -jar junit-platform-console-standalone.jar \
-  --select-method-file test_methods.txt
+# java -jar junit-platform-console-standalone.jar \
+#   --select-method-file test_methods.txt
+```
+
+**当前替代方案**：
+
+```bash
+# 使用测试文件推荐
+tia-recommend --db impact_map.db --quiet > test_files.txt
+cat test_files.txt | xargs mvn test -Dtest=
 ```
 
 ---
@@ -339,16 +365,23 @@ tia-mapper build \
 - 并发处理（concurrency=4）: 100 个文件 → 35 秒
 - 并发处理（concurrency=8）: 100 个文件 → 20 秒
 
-### 6.2 增量更新（待实现）
+### 6.2 增量更新（计划中）
+
+> ⚠️ **注意**：`--incremental` 选项尚未实现，计划在未来版本中提供
+
+数据库已包含 `processed_files` 表支持增量更新，但 CLI 选项尚未实现。
+
+**当前替代方案**：
 
 ```bash
-# 只处理新增或修改的覆盖率文件
-tia-mapper build \
-  --coverage-dir ./coverage \
-  --db impact_map.db \
-  --incremental
+# 清理旧数据后重新构建
+rm -rf coverage_data/*.profraw
+tia-mapper build --coverage-dir ./coverage --db impact_map.db
 
-# TiaCC 会检查 processed_files 表，跳过已处理的文件
+# 或使用时间戳过滤最近的文件
+find ./coverage -name "*.cov.json" -mtime -1 | while read file; do
+  # 处理最近修改的文件
+done
 ```
 
 ---

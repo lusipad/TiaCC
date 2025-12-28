@@ -856,18 +856,19 @@ tia-recommend --db impact_map.db --flaky
 要启用智能推荐，需要在 CI 中记录测试执行结果：
 
 ```typescript
-import { TiaCC } from '@tiacc/tools';
+import { initDatabase } from '@tiacc/tools';
 
-const tia = await TiaCC.init('./impact_map.db');
+// 注意：使用底层 Database API，高层 TiaCC API 暂未暴露此方法
+const db = initDatabase('./impact_map.db');
 
 // 记录测试执行结果
-await tia.recordTestResult({
-  testPath: 'test_calculator.cpp',
-  passed: true,
-  durationMs: 1250,
-  commitHash: 'abc123',
-  changedFiles: ['src/calculator.cpp']
-});
+db.recordTestResult(
+  'test_calculator.cpp',      // testPath
+  true,                       // passed
+  1250,                       // durationMs
+  'abc123',                   // commitHash
+  ['src/calculator.cpp']      // changedFiles
+);
 ```
 
 ### 10.6 适用场景
