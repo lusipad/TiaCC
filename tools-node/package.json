@@ -59,11 +59,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/TiaCC.git"
+    "url": "https://github.com/lusipad/TiaCC.git"
   },
-  "homepage": "https://github.com/your-org/TiaCC#readme",
+  "homepage": "https://github.com/lusipad/TiaCC#readme",
   "bugs": {
-    "url": "https://github.com/your-org/TiaCC/issues"
+    "url": "https://github.com/lusipad/TiaCC/issues"
   },
   "license": "MIT",
   "author": "TiaCC Team",
