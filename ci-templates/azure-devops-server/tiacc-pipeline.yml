@@ -1,0 +1,249 @@
+# TiaCC Azure DevOps Server Pipeline Template
+# Compatible with Azure DevOps Server 2019, 2020, 2022
+#
+# Usage:
+#   1. Copy this file to your repository
+#   2. Create a new pipeline pointing to this file
+#   3. Configure the variables below
+#
+# Note: Azure DevOps Server may have limited agent capabilities.
+# Ensure your agents have Node.js 18+ installed.
+
+trigger:
+  branches:
+    include:
+      - main
+      - master
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+
+# Variables - customize these for your project
+variables:
+  TIACC_DATABASE: 'impact_map.db'
+  TIACC_COVERAGE_DIR: './coverage'
+  TIACC_FORMAT: 'auto'
+  TIACC_VERBOSE: 'false'
+  # For on-premises, you may need to configure npm registry
+  # NPM_REGISTRY: 'https://your-npm-registry/'
+
+pool:
+  # Use your on-premises agent pool name
+  name: 'Default'
+  # Or use demands for specific capabilities
+  # demands:
+  #   - node
+
+stages:
+  # Stage 1: Build mapping on main branch
+  - stage: BuildMapping
+    displayName: 'Build TiaCC Mapping'
+    condition: |
+      and(
+        succeeded(),
+        or(
+          eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+          eq(variables['Build.SourceBranch'], 'refs/heads/master'),
+          eq(variables['Build.Reason'], 'Schedule')
+        )
+      )
+    jobs:
+      - job: Build
+        displayName: 'Build Impact Map'
+        steps:
+          - checkout: self
+            fetchDepth: 0
+
+          # Restore cached database
+          - task: Cache@2
+            displayName: 'Restore TiaCC Cache'
+            inputs:
+              key: 'tiacc-db | $(Agent.OS)'
+              path: '$(TIACC_DATABASE)'
+              restoreKeys: |
+                tiacc-db | $(Agent.OS)
+
+          # Install TiaCC - for on-premises, you may need to configure npm
+          - script: |
+              # Uncomment if using private registry
+              # npm config set registry $(NPM_REGISTRY)
+              npm install -g @tiacc/tools
+            displayName: 'Install TiaCC'
+
+          # Run your tests with coverage (customize this)
+          - script: |
+              echo "Running tests with coverage..."
+              # npm test -- --coverage
+              # pytest --cov --cov-report=json
+              # ./gradlew test jacocoTestReport
+            displayName: 'Run Tests with Coverage'
+
+          # Build TiaCC mapping
+          - script: |
+              FORMAT_ARG=""
+              case "$(TIACC_FORMAT)" in
+                lcov) FORMAT_ARG="--lcov" ;;
+                jacoco) FORMAT_ARG="--jacoco" ;;
+                istanbul) FORMAT_ARG="--istanbul" ;;
+                coveragepy) FORMAT_ARG="--coveragepy" ;;
+                dotcover) FORMAT_ARG="--dotcover" ;;
+                opencppcoverage) FORMAT_ARG="--opencppcoverage" ;;
+              esac
+
+              VERBOSE_ARG=""
+              if [ "$(TIACC_VERBOSE)" = "true" ]; then
+                VERBOSE_ARG="-v"
+              fi
+
+              tia-mapper build \
+                -c $(TIACC_COVERAGE_DIR) \
+                -d $(TIACC_DATABASE) \
+                $FORMAT_ARG \
+                $VERBOSE_ARG
+            displayName: 'Build TiaCC Mapping'
+
+          # Save database for future builds
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Database'
+            inputs:
+              PathtoPublish: '$(TIACC_DATABASE)'
+              ArtifactName: 'tiacc-database'
+              publishLocation: 'Container'
+
+  # Stage 2: Recommend tests for PRs
+  - stage: RecommendTests
+    displayName: 'TiaCC Test Recommendation'
+    condition: eq(variables['Build.Reason'], 'PullRequest')
+    jobs:
+      - job: Recommend
+        displayName: 'Get Affected Tests'
+        steps:
+          - checkout: self
+            fetchDepth: 0
+
+          # Download database from previous successful build
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download TiaCC Database'
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProjectId)'
+              pipeline: '$(System.DefinitionId)'
+              buildVersionToDownload: 'latestFromBranch'
+              branchName: 'refs/heads/main'
+              artifactName: 'tiacc-database'
+              downloadPath: '$(System.ArtifactsDirectory)'
+            continueOnError: true
+
+          # Restore database
+          - script: |
+              if [ -f "$(System.ArtifactsDirectory)/tiacc-database/$(TIACC_DATABASE)" ]; then
+                cp "$(System.ArtifactsDirectory)/tiacc-database/$(TIACC_DATABASE)" .
+                echo "Database restored from artifacts"
+              else
+                echo "No database found in artifacts"
+              fi
+            displayName: 'Restore Database'
+
+          # Install TiaCC
+          - script: |
+              npm install -g @tiacc/tools
+            displayName: 'Install TiaCC'
+
+          # Get affected tests
+          - script: |
+              if [ ! -f "$(TIACC_DATABASE)" ]; then
+                echo "No TiaCC database found. Will run all tests."
+                echo "" > affected-tests.txt
+                echo "##vso[task.setvariable variable=TIACC_AFFECTED_TESTS;isOutput=true]"
+                echo "##vso[task.setvariable variable=TIACC_RUN_ALL;isOutput=true]true"
+                exit 0
+              fi
+
+              TARGET_BRANCH="$(System.PullRequest.TargetBranch)"
+              # Remove refs/heads/ prefix if present
+              TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+
+              VERBOSE_ARG=""
+              if [ "$(TIACC_VERBOSE)" = "true" ]; then
+                VERBOSE_ARG="-v"
+              fi
+
+              tia-recommend \
+                --db $(TIACC_DATABASE) \
+                --base origin/$TARGET_BRANCH \
+                $VERBOSE_ARG > affected-tests.txt 2>/dev/null || true
+
+              echo "=== TiaCC Test Impact Analysis ==="
+              echo "Affected tests:"
+              cat affected-tests.txt
+              echo "==================================="
+
+              # Set output variables
+              AFFECTED=$(cat affected-tests.txt | tr '\n' ',' | sed 's/,$//')
+              if [ -n "$AFFECTED" ]; then
+                echo "##vso[task.setvariable variable=TIACC_AFFECTED_TESTS;isOutput=true]$AFFECTED"
+                echo "##vso[task.setvariable variable=TIACC_RUN_ALL;isOutput=true]false"
+              else
+                echo "##vso[task.setvariable variable=TIACC_AFFECTED_TESTS;isOutput=true]"
+                echo "##vso[task.setvariable variable=TIACC_RUN_ALL;isOutput=true]true"
+              fi
+            name: tiacc
+            displayName: 'Get Affected Tests'
+
+          # Publish affected tests file
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Affected Tests'
+            inputs:
+              PathtoPublish: 'affected-tests.txt'
+              ArtifactName: 'tiacc-affected-tests'
+              publishLocation: 'Container'
+
+  # Stage 3: Run Tests
+  - stage: Test
+    displayName: 'Run Tests'
+    dependsOn:
+      - RecommendTests
+    condition: |
+      or(
+        eq(variables['Build.Reason'], 'PullRequest'),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        eq(variables['Build.SourceBranch'], 'refs/heads/master')
+      )
+    jobs:
+      - job: RunTests
+        displayName: 'Execute Tests'
+        variables:
+          AFFECTED_TESTS: $[ stageDependencies.RecommendTests.Recommend.outputs['tiacc.TIACC_AFFECTED_TESTS'] ]
+          RUN_ALL: $[ stageDependencies.RecommendTests.Recommend.outputs['tiacc.TIACC_RUN_ALL'] ]
+        steps:
+          - checkout: self
+
+          # Download affected tests file
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Affected Tests'
+            inputs:
+              buildType: 'current'
+              artifactName: 'tiacc-affected-tests'
+              downloadPath: '$(System.ArtifactsDirectory)'
+            condition: eq(variables['Build.Reason'], 'PullRequest')
+            continueOnError: true
+
+          # Run tests based on TiaCC recommendation
+          - script: |
+              if [ "$(RUN_ALL)" = "true" ] || [ -z "$(AFFECTED_TESTS)" ]; then
+                echo "Running all tests..."
+                # Customize: Add your full test command
+                # npm test
+                # pytest
+                # ./gradlew test
+              else
+                echo "Running affected tests: $(AFFECTED_TESTS)"
+                # Customize: Add your filtered test command
+                # npm test -- --grep "$(AFFECTED_TESTS)"
+                # pytest $(AFFECTED_TESTS)
+                # ./gradlew test --tests "$(AFFECTED_TESTS)"
+              fi
+            displayName: 'Run Tests'

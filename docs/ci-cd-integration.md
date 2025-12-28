@@ -64,6 +64,118 @@ unit-tests:
       fi
 ```
 
+### Jenkins
+
+```groovy
+// Jenkinsfile
+pipeline {
+    agent any
+
+    environment {
+        TIACC_DATABASE = 'impact_map.db'
+        TIACC_COVERAGE_DIR = './coverage'
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                sh 'npm install -g @tiacc/tools'
+            }
+        }
+
+        stage('Restore Database') {
+            steps {
+                copyArtifacts(
+                    projectName: env.JOB_NAME,
+                    filter: 'impact_map.db',
+                    selector: lastSuccessful(),
+                    optional: true
+                )
+            }
+        }
+
+        stage('Build Mapping') {
+            when { branch 'main' }
+            steps {
+                sh 'npm test -- --coverage'
+                sh 'tia-mapper build -c ./coverage -d impact_map.db'
+                archiveArtifacts artifacts: 'impact_map.db'
+            }
+        }
+
+        stage('Recommend Tests') {
+            when { changeRequest() }
+            steps {
+                script {
+                    env.AFFECTED = sh(
+                        script: 'tia-recommend --db impact_map.db --base origin/main',
+                        returnStdout: true
+                    ).trim()
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                script {
+                    if (env.AFFECTED) {
+                        sh "npm test -- --grep '${env.AFFECTED}'"
+                    } else {
+                        sh 'npm test'
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+For advanced usage, see the Jenkins shared library in `ci-templates/jenkins-shared-library/`.
+
+### Azure DevOps Server
+
+```yaml
+# azure-pipelines.yml
+trigger:
+  - main
+
+pr:
+  - main
+
+variables:
+  TIACC_DATABASE: 'impact_map.db'
+
+stages:
+  - stage: BuildMapping
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+    jobs:
+      - job: Build
+        steps:
+          - script: npm install -g @tiacc/tools
+          - script: npm test -- --coverage
+          - script: tia-mapper build -c ./coverage -d $(TIACC_DATABASE)
+          - publish: $(TIACC_DATABASE)
+            artifact: tiacc-database
+
+  - stage: RecommendTests
+    condition: eq(variables['Build.Reason'], 'PullRequest')
+    jobs:
+      - job: Recommend
+        steps:
+          - task: DownloadBuildArtifacts@1
+            inputs:
+              artifactName: tiacc-database
+            continueOnError: true
+          - script: npm install -g @tiacc/tools
+          - script: |
+              tia-recommend --db $(TIACC_DATABASE) \
+                --base origin/$(System.PullRequest.TargetBranch) \
+                > affected-tests.txt
+            name: tiacc
+```
+
+For Windows agents and classic builds, see PowerShell scripts in `ci-templates/azure-devops-server/`.
+
 ## Workflow Overview
 
 ```
@@ -344,6 +456,41 @@ cache:
   inputs:
     key: 'tiacc | $(Agent.OS)'
     path: 'impact_map.db'
+```
+
+### Jenkins Artifact Cache
+
+```groovy
+// Save database after build
+archiveArtifacts artifacts: 'impact_map.db', fingerprint: true
+
+// Restore in subsequent builds
+copyArtifacts(
+    projectName: env.JOB_NAME,
+    filter: 'impact_map.db',
+    selector: lastSuccessful(),
+    optional: true
+)
+```
+
+### Azure DevOps Server Cache
+
+```yaml
+# Using build artifacts (more reliable for on-premises)
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: 'impact_map.db'
+    ArtifactName: 'tiacc-database'
+
+# Download in PR builds
+- task: DownloadBuildArtifacts@1
+  inputs:
+    buildType: 'specific'
+    project: '$(System.TeamProjectId)'
+    pipeline: '$(System.DefinitionId)'
+    buildVersionToDownload: 'latestFromBranch'
+    branchName: 'refs/heads/main'
+    artifactName: 'tiacc-database'
 ```
 
 ## Best Practices
