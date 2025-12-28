@@ -1,5 +1,9 @@
 # TiaCC CI/CD Integration Guide
 
+> This guide focuses on integrating TiaCC into various CI/CD platforms.
+>
+> 📖 For general TiaCC integration (coverage collection, mapping setup), see: [Integration Guide](integration-guide.md)
+
 TiaCC can be integrated into your CI/CD pipeline to automatically run only affected tests on pull requests, significantly reducing CI time.
 
 ## Quick Start

@@ -411,3 +411,14 @@ rm -rf coverage_data/*.profraw
 # 重新运行映射生成
 tia-mapper build --coverage-dir ./coverage_data --db impact_map.db
 ```
+
+---
+
+## 下一步
+
+集成完成后，您可以：
+
+- 📖 **CI/CD 平台集成**：查看 [CI/CD Integration Guide](ci-cd-integration.md) 了解如何集成到 GitHub Actions、GitLab CI、Jenkins 等平台
+- 🎯 **高级功能**：查看 [Advanced Features](advanced-features.md) 了解智能推荐、失败预测等高级功能
+- 📊 **可视化分析**：使用 [Dashboard](../dashboard/README.md) 进行交互式代码覆盖率分析
+- 🔧 **架构设计**：查看 [Architecture](architecture.md) 了解系统架构和扩展点
