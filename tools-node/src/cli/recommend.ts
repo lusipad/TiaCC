@@ -4,13 +4,25 @@
  *
  * Analyzes Git changes and recommends tests to run based on the impact map.
  * Supports both file-level and function-level precision.
+ * Phase 4: Smart recommendations with priority scoring and failure prediction.
  */
 
 import { Command } from 'commander';
-import { writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { initDatabase } from '../database.js';
 import { GitUtils } from '../git-utils.js';
 import type { FunctionTestMapping } from '../types.js';
+
+// Smart recommendation result type
+interface SmartRecommendation {
+  testPath: string;
+  priorityScore: number;
+  failureProbability: number;
+  estimatedDurationMs: number | null;
+  coverageScore: number;
+  recentFailureRate: number;
+  reasons: string[];
+}
 
 const program = new Command();
 
@@ -53,10 +65,26 @@ program
   .option('-q, --quiet', 'Only output test names, no headers')
   .option('--methods', 'Output precise test methods (ClassName::methodName) instead of test scripts')
   .option('--group-by-class', 'Group output by test class')
+  // Phase 4: Smart recommendation options
+  .option('--smart', 'Use smart recommendations with priority scoring and failure prediction')
+  .option('--show-probability', 'Show failure probability for each test')
+  .option('--show-duration', 'Show estimated duration for each test')
+  .option('--top <n>', 'Limit to top N tests by priority score', parseInt)
+  .option('--min-probability <p>', 'Only show tests with failure probability >= p (0-1)', parseFloat)
+  .option('--flaky', 'Show tests most likely to fail (based on historical data)')
   .action(async (options) => {
     try {
       const git = new GitUtils();
       const level = options.level === 'file' ? 'file' : 'function';
+
+      const db = initDatabase(options.db);
+
+      // Handle --flaky option: show most flaky tests regardless of changes
+      if (options.flaky) {
+        await runFlakyAnalysis(db, options);
+        db.close();
+        return;
+      }
 
       // Determine base reference
       let baseRef = options.base;
@@ -83,10 +111,10 @@ program
         }
       }
 
-      const db = initDatabase(options.db);
-
-      // Use function-level or file-level based on option
-      if (level === 'function') {
+      // Use smart recommendations if --smart option is set
+      if (options.smart) {
+        await runSmartAnalysis(git, db, baseRef, options);
+      } else if (level === 'function') {
         await runFunctionLevelAnalysis(git, db, baseRef, options, changeScale);
       } else {
         await runFileLevelAnalysis(git, db, baseRef, options);
@@ -153,6 +181,216 @@ async function runFileLevelAnalysis(
 
   writeOutputFile(options, recommendedTests);
   printSummary(changedFiles.length, recommendedTests.length, options);
+}
+
+/**
+ * Smart analysis with priority scoring and failure prediction (Phase 4)
+ */
+async function runSmartAnalysis(
+  git: GitUtils,
+  db: ReturnType<typeof initDatabase>,
+  baseRef: string,
+  options: any
+): Promise<void> {
+  // Get changed files
+  const changedFiles = await git.getChangedFiles({
+    baseRef,
+    includeUntracked: options.includeUntracked,
+    extensions: options.extensions,
+  });
+
+  if (changedFiles.length === 0) {
+    if (!options.quiet) {
+      console.log('No relevant file changes detected.');
+    }
+    return;
+  }
+
+  if (!options.quiet && !options.json) {
+    console.log(`Changed files (${changedFiles.length}):`);
+    const displayFiles = changedFiles.slice(0, 5);
+    for (const f of displayFiles) {
+      console.log(`  - ${f}`);
+    }
+    if (changedFiles.length > 5) {
+      console.log(`  ... and ${changedFiles.length - 5} more`);
+    }
+    console.log();
+  }
+
+  // Get smart recommendations
+  let recommendations = db.getSmartRecommendations(changedFiles);
+
+  // Apply filters
+  if (options.minProbability !== undefined) {
+    recommendations = recommendations.filter(r => r.failureProbability >= options.minProbability);
+  }
+
+  if (options.top !== undefined) {
+    recommendations = recommendations.slice(0, options.top);
+  }
+
+  // Calculate estimated duration
+  const testPaths = recommendations.map(r => r.testPath);
+  const duration = db.getEstimatedDuration(testPaths);
+
+  // Output results
+  if (options.json) {
+    const result = {
+      mode: 'smart',
+      changedFiles,
+      recommendations,
+      summary: {
+        totalTests: recommendations.length,
+        estimatedDurationMs: duration.totalMs,
+        estimatedDurationFormatted: formatDuration(duration.totalMs),
+      },
+    };
+    console.log(JSON.stringify(result, null, 2));
+  } else if (options.quiet) {
+    for (const rec of recommendations) {
+      console.log(rec.testPath);
+    }
+  } else {
+    outputSmartResults(recommendations, options, duration);
+  }
+
+  // Write output file
+  writeOutputFile(options, testPaths);
+}
+
+/**
+ * Show flaky/unstable tests based on historical data
+ */
+async function runFlakyAnalysis(
+  db: ReturnType<typeof initDatabase>,
+  options: any
+): Promise<void> {
+  const limit = options.top || 10;
+  const flakyTests = db.getMostLikelyToFail(limit);
+
+  if (options.json) {
+    console.log(JSON.stringify({ flakyTests }, null, 2));
+    return;
+  }
+
+  if (flakyTests.length === 0) {
+    if (!options.quiet) {
+      console.log('No test history data available.');
+      console.log('Use "tia-recommend record" to record test results first.');
+    }
+    return;
+  }
+
+  if (!options.quiet) {
+    console.log('Most Flaky Tests (based on historical data):');
+    console.log();
+  }
+
+  for (let i = 0; i < flakyTests.length; i++) {
+    const test = flakyTests[i];
+    if (options.quiet) {
+      console.log(test.testPath);
+    } else {
+      const failureRate = (test.recentFailureRate * 100).toFixed(1);
+      const streakInfo = test.failureStreak > 0 ? ` (${test.failureStreak} consecutive failures)` : '';
+      console.log(`  ${i + 1}. ${test.testPath}`);
+      console.log(`     Recent failure rate: ${failureRate}%${streakInfo}`);
+      if (test.lastFailureDate) {
+        console.log(`     Last failure: ${test.lastFailureDate}`);
+      }
+      console.log();
+    }
+  }
+
+  if (!options.quiet) {
+    console.log('='.repeat(60));
+    console.log(`Total: ${flakyTests.length} flaky tests identified`);
+  }
+}
+
+/**
+ * Output smart recommendation results
+ */
+function outputSmartResults(
+  recommendations: SmartRecommendation[],
+  options: any,
+  duration: { totalMs: number; breakdown: Array<{ testPath: string; estimatedMs: number | null }> }
+): void {
+  if (recommendations.length === 0) {
+    console.log('No tests found for changed files.');
+    return;
+  }
+
+  console.log('Smart Test Recommendations (sorted by priority):');
+  console.log();
+
+  for (let i = 0; i < recommendations.length; i++) {
+    const rec = recommendations[i];
+    const prefix = i === recommendations.length - 1 ? '└─' : '├─';
+
+    // Priority badge
+    let priorityBadge = '';
+    if (rec.priorityScore >= 70) {
+      priorityBadge = ' 🔴 HIGH';
+    } else if (rec.priorityScore >= 40) {
+      priorityBadge = ' 🟡 MEDIUM';
+    } else {
+      priorityBadge = ' 🟢 LOW';
+    }
+
+    console.log(`  ${prefix} ${rec.testPath}${priorityBadge}`);
+
+    const indent = i === recommendations.length - 1 ? '   ' : '│  ';
+
+    // Show priority score
+    console.log(`  ${indent}   Priority Score: ${rec.priorityScore.toFixed(1)}/100`);
+
+    // Show failure probability if requested
+    if (options.showProbability || rec.failureProbability > 0.3) {
+      const prob = (rec.failureProbability * 100).toFixed(1);
+      console.log(`  ${indent}   Failure Probability: ${prob}%`);
+    }
+
+    // Show duration if requested
+    if (options.showDuration && rec.estimatedDurationMs !== null) {
+      console.log(`  ${indent}   Estimated Duration: ${formatDuration(rec.estimatedDurationMs)}`);
+    }
+
+    // Show reasons
+    if (rec.reasons.length > 0) {
+      console.log(`  ${indent}   Reasons: ${rec.reasons.join(', ')}`);
+    }
+
+    console.log();
+  }
+
+  console.log('='.repeat(60));
+  console.log(`Summary: ${recommendations.length} tests recommended`);
+  if (duration.totalMs > 0) {
+    console.log(`Estimated total duration: ${formatDuration(duration.totalMs)}`);
+  }
+
+  // Show smart stats
+  const smartStats = recommendations.reduce((acc, r) => {
+    if (r.priorityScore >= 70) acc.high++;
+    else if (r.priorityScore >= 40) acc.medium++;
+    else acc.low++;
+    return acc;
+  }, { high: 0, medium: 0, low: 0 });
+
+  console.log(`Priority breakdown: ${smartStats.high} high, ${smartStats.medium} medium, ${smartStats.low} low`);
+}
+
+/**
+ * Format duration in human-readable format
+ */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  return `${minutes}m ${seconds}s`;
 }
 
 /**
@@ -514,5 +752,161 @@ function printSummary(
     console.log(`Summary: ${changedCount} files changed, ${testCount} tests recommended`);
   }
 }
+
+// ============ Record subcommand (Phase 4) ============
+
+program
+  .command('record')
+  .description('Record test execution results for smart recommendations')
+  .option('-d, --db <path>', 'Impact map database path', 'impact_map.db')
+  .option('-t, --test <name>', 'Test name/path')
+  .option('-p, --passed', 'Mark test as passed')
+  .option('-f, --failed', 'Mark test as failed')
+  .option('--duration <ms>', 'Test duration in milliseconds', parseInt)
+  .option('--commit <hash>', 'Git commit hash')
+  .option('--changed-files <files...>', 'Changed files for this run')
+  .option('--from-file <path>', 'Read test results from JSON file')
+  .option('--from-junit <path>', 'Read test results from JUnit XML file')
+  .option('-v, --verbose', 'Show detailed output')
+  .action((options) => {
+    try {
+      const db = initDatabase(options.db);
+
+      // Read from file if specified
+      if (options.fromFile) {
+        recordFromJsonFile(db, options.fromFile, options);
+      } else if (options.fromJunit) {
+        recordFromJunitFile(db, options.fromJunit, options);
+      } else if (options.test) {
+        // Record single test
+        const passed = options.passed === true || options.failed !== true;
+        db.recordTestResult(
+          options.test,
+          passed,
+          options.duration,
+          options.commit,
+          options.changedFiles
+        );
+        if (options.verbose) {
+          console.log(`Recorded: ${options.test} - ${passed ? 'PASSED' : 'FAILED'}`);
+        }
+      } else {
+        console.error('Error: Specify --test, --from-file, or --from-junit');
+        process.exit(1);
+      }
+
+      db.close();
+    } catch (error) {
+      console.error(`Error: ${error}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Record test results from JSON file
+ * Expected format:
+ * {
+ *   "commitHash": "abc123",
+ *   "changedFiles": ["file1.ts", "file2.ts"],
+ *   "results": [
+ *     { "testPath": "test1", "passed": true, "durationMs": 100 },
+ *     { "testPath": "test2", "passed": false, "durationMs": 200 }
+ *   ]
+ * }
+ */
+function recordFromJsonFile(
+  db: ReturnType<typeof initDatabase>,
+  filePath: string,
+  options: any
+): void {
+  const content = readFileSync(filePath, 'utf-8');
+  const data = JSON.parse(content);
+
+  const results = data.results || [];
+  const commitHash = data.commitHash || options.commit;
+  const changedFiles = data.changedFiles || options.changedFiles;
+
+  db.batchRecordTestResults(results, commitHash, changedFiles);
+
+  if (options.verbose) {
+    const passed = results.filter((r: any) => r.passed).length;
+    const failed = results.length - passed;
+    console.log(`Recorded ${results.length} test results (${passed} passed, ${failed} failed)`);
+  }
+}
+
+/**
+ * Record test results from JUnit XML file
+ */
+function recordFromJunitFile(
+  db: ReturnType<typeof initDatabase>,
+  filePath: string,
+  options: any
+): void {
+  const content = readFileSync(filePath, 'utf-8');
+
+  // Simple JUnit XML parsing
+  const results: Array<{ testPath: string; passed: boolean; durationMs?: number }> = [];
+
+  // Parse testcase elements
+  const testcaseRegex = /<testcase\s+(?:[^>]*?\s)?name="([^"]+)"(?:\s+classname="([^"]+)")?(?:\s+time="([^"]+)")?[^>]*>([\s\S]*?)<\/testcase>|<testcase\s+(?:[^>]*?\s)?name="([^"]+)"(?:\s+classname="([^"]+)")?(?:\s+time="([^"]+)")?[^>]*\/>/g;
+
+  let match;
+  while ((match = testcaseRegex.exec(content)) !== null) {
+    const name = match[1] || match[5];
+    const className = match[2] || match[6] || '';
+    const time = match[3] || match[7];
+    const body = match[4] || '';
+
+    const testPath = className ? `${className}::${name}` : name;
+    const passed = !body.includes('<failure') && !body.includes('<error');
+    const durationMs = time ? Math.round(parseFloat(time) * 1000) : undefined;
+
+    results.push({ testPath, passed, durationMs });
+  }
+
+  if (results.length === 0) {
+    console.error('No test cases found in JUnit XML file');
+    return;
+  }
+
+  db.batchRecordTestResults(results, options.commit, options.changedFiles);
+
+  if (options.verbose) {
+    const passed = results.filter(r => r.passed).length;
+    const failed = results.length - passed;
+    console.log(`Recorded ${results.length} test results from JUnit XML (${passed} passed, ${failed} failed)`);
+  }
+}
+
+// ============ Stats subcommand (Phase 4) ============
+
+program
+  .command('stats')
+  .description('Show smart recommendation statistics')
+  .option('-d, --db <path>', 'Impact map database path', 'impact_map.db')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    try {
+      const db = initDatabase(options.db);
+      const stats = db.getSmartStats();
+
+      if (options.json) {
+        console.log(JSON.stringify(stats, null, 2));
+      } else {
+        console.log('Smart Recommendation Statistics:');
+        console.log();
+        console.log(`  Tests with history:     ${stats.testsWithHistory}`);
+        console.log(`  Total history records:  ${stats.totalHistoryRecords}`);
+        console.log(`  Failure correlations:   ${stats.correlationsTracked}`);
+        console.log(`  Average failure rate:   ${(stats.avgFailureRate * 100).toFixed(1)}%`);
+      }
+
+      db.close();
+    } catch (error) {
+      console.error(`Error: ${error}`);
+      process.exit(1);
+    }
+  });
 
 program.parse();

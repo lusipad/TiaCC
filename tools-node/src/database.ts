@@ -124,6 +124,53 @@ CREATE TABLE IF NOT EXISTS processed_files (
 
 CREATE INDEX IF NOT EXISTS idx_processed_files_path ON processed_files(file_path);
 CREATE INDEX IF NOT EXISTS idx_processed_files_test ON processed_files(test_script_id);
+
+-- ============ Smart Recommendation tables (Phase 4) ============
+
+-- Test execution history for failure prediction
+CREATE TABLE IF NOT EXISTS test_history (
+    id INTEGER PRIMARY KEY,
+    test_script_id INTEGER NOT NULL,
+    run_date TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    duration_ms INTEGER,
+    commit_hash TEXT,
+    changed_files TEXT,
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_test_history_test ON test_history(test_script_id);
+CREATE INDEX IF NOT EXISTS idx_test_history_date ON test_history(run_date);
+
+-- Aggregated test statistics for quick access
+CREATE TABLE IF NOT EXISTS test_stats (
+    test_script_id INTEGER PRIMARY KEY,
+    total_runs INTEGER DEFAULT 0,
+    total_passes INTEGER DEFAULT 0,
+    total_failures INTEGER DEFAULT 0,
+    avg_duration_ms INTEGER,
+    last_failure_date TEXT,
+    failure_streak INTEGER DEFAULT 0,
+    recent_failure_rate REAL DEFAULT 0,
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
+
+-- File change correlation with test failures
+CREATE TABLE IF NOT EXISTS failure_correlations (
+    id INTEGER PRIMARY KEY,
+    source_file_id INTEGER NOT NULL,
+    test_script_id INTEGER NOT NULL,
+    correlation_score REAL DEFAULT 0,
+    failure_count INTEGER DEFAULT 0,
+    total_changes INTEGER DEFAULT 0,
+    last_updated TEXT,
+    UNIQUE(source_file_id, test_script_id),
+    FOREIGN KEY (source_file_id) REFERENCES source_files(id),
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_failure_corr_source ON failure_correlations(source_file_id);
+CREATE INDEX IF NOT EXISTS idx_failure_corr_test ON failure_correlations(test_script_id);
 `;
 
 export class TiaDatabase {
@@ -922,6 +969,466 @@ export class TiaDatabase {
     }
 
     return purged;
+  }
+
+  // ============ Smart Recommendation Operations (Phase 4) ============
+
+  /**
+   * Record a test execution result
+   */
+  recordTestResult(
+    testScriptPath: string,
+    passed: boolean,
+    durationMs?: number,
+    commitHash?: string,
+    changedFiles?: string[]
+  ): void {
+    const now = new Date().toISOString();
+
+    // Get or create test script
+    const testId = this.upsertTestScript(testScriptPath, durationMs);
+
+    // Record in history
+    const historyStmt = this.db.prepare(`
+      INSERT INTO test_history (test_script_id, run_date, passed, duration_ms, commit_hash, changed_files)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    historyStmt.run(
+      testId,
+      now,
+      passed ? 1 : 0,
+      durationMs ?? null,
+      commitHash ?? null,
+      changedFiles ? JSON.stringify(changedFiles) : null
+    );
+
+    // Update aggregated stats
+    this.updateTestStats(testId, passed, durationMs);
+
+    // Update failure correlations if test failed
+    if (!passed && changedFiles && changedFiles.length > 0) {
+      this.updateFailureCorrelations(testId, changedFiles);
+    }
+  }
+
+  /**
+   * Update aggregated test statistics
+   */
+  private updateTestStats(testScriptId: number, passed: boolean, durationMs?: number): void {
+    const now = new Date().toISOString();
+
+    // Get current stats
+    const selectStmt = this.db.prepare('SELECT * FROM test_stats WHERE test_script_id = ?');
+    const current = selectStmt.get(testScriptId) as any;
+
+    if (!current) {
+      // Create new stats record
+      const insertStmt = this.db.prepare(`
+        INSERT INTO test_stats (test_script_id, total_runs, total_passes, total_failures, avg_duration_ms, last_failure_date, failure_streak, recent_failure_rate)
+        VALUES (?, 1, ?, ?, ?, ?, ?, ?)
+      `);
+      insertStmt.run(
+        testScriptId,
+        passed ? 1 : 0,
+        passed ? 0 : 1,
+        durationMs ?? null,
+        passed ? null : now,
+        passed ? 0 : 1,
+        passed ? 0 : 1
+      );
+    } else {
+      // Update existing stats
+      const totalRuns = current.total_runs + 1;
+      const totalPasses = current.total_passes + (passed ? 1 : 0);
+      const totalFailures = current.total_failures + (passed ? 0 : 1);
+
+      // Running average for duration
+      let avgDuration = current.avg_duration_ms;
+      if (durationMs !== undefined) {
+        if (avgDuration === null) {
+          avgDuration = durationMs;
+        } else {
+          avgDuration = Math.floor((avgDuration + durationMs) / 2);
+        }
+      }
+
+      // Failure streak
+      let failureStreak = passed ? 0 : (current.failure_streak + 1);
+
+      // Recent failure rate (weighted towards recent runs)
+      const alpha = 0.3; // Weight for recent result
+      const recentFailureRate = alpha * (passed ? 0 : 1) + (1 - alpha) * (current.recent_failure_rate || 0);
+
+      const updateStmt = this.db.prepare(`
+        UPDATE test_stats SET
+          total_runs = ?,
+          total_passes = ?,
+          total_failures = ?,
+          avg_duration_ms = ?,
+          last_failure_date = COALESCE(?, last_failure_date),
+          failure_streak = ?,
+          recent_failure_rate = ?
+        WHERE test_script_id = ?
+      `);
+      updateStmt.run(
+        totalRuns,
+        totalPasses,
+        totalFailures,
+        avgDuration,
+        passed ? null : now,
+        failureStreak,
+        recentFailureRate,
+        testScriptId
+      );
+    }
+  }
+
+  /**
+   * Update failure correlations between source files and tests
+   */
+  private updateFailureCorrelations(testScriptId: number, changedFiles: string[]): void {
+    const now = new Date().toISOString();
+
+    for (const filePath of changedFiles) {
+      const sourceId = this.getSourceFileId(filePath);
+      if (!sourceId) continue;
+
+      // Get current correlation
+      const selectStmt = this.db.prepare(`
+        SELECT * FROM failure_correlations WHERE source_file_id = ? AND test_script_id = ?
+      `);
+      const current = selectStmt.get(sourceId, testScriptId) as any;
+
+      if (!current) {
+        // Create new correlation
+        const insertStmt = this.db.prepare(`
+          INSERT INTO failure_correlations (source_file_id, test_script_id, correlation_score, failure_count, total_changes, last_updated)
+          VALUES (?, ?, ?, 1, 1, ?)
+        `);
+        insertStmt.run(sourceId, testScriptId, 1.0, now);
+      } else {
+        // Update correlation score
+        const failureCount = current.failure_count + 1;
+        const totalChanges = current.total_changes + 1;
+        const correlationScore = failureCount / totalChanges;
+
+        const updateStmt = this.db.prepare(`
+          UPDATE failure_correlations SET
+            correlation_score = ?,
+            failure_count = ?,
+            total_changes = ?,
+            last_updated = ?
+          WHERE id = ?
+        `);
+        updateStmt.run(correlationScore, failureCount, totalChanges, now, current.id);
+      }
+    }
+  }
+
+  /**
+   * Record that a file was changed (for correlation tracking)
+   */
+  recordFileChange(filePath: string, testScriptIds: number[]): void {
+    const sourceId = this.getSourceFileId(filePath);
+    if (!sourceId) return;
+
+    const now = new Date().toISOString();
+
+    for (const testId of testScriptIds) {
+      const selectStmt = this.db.prepare(`
+        SELECT * FROM failure_correlations WHERE source_file_id = ? AND test_script_id = ?
+      `);
+      const current = selectStmt.get(sourceId, testId) as any;
+
+      if (current) {
+        // Increment total_changes
+        const updateStmt = this.db.prepare(`
+          UPDATE failure_correlations SET total_changes = total_changes + 1, last_updated = ?
+          WHERE id = ?
+        `);
+        updateStmt.run(now, current.id);
+      }
+    }
+  }
+
+  /**
+   * Get test statistics for a test script
+   */
+  getTestStats(testScriptPath: string): {
+    totalRuns: number;
+    totalPasses: number;
+    totalFailures: number;
+    avgDurationMs: number | null;
+    failureRate: number;
+    recentFailureRate: number;
+    failureStreak: number;
+    lastFailureDate: string | null;
+  } | null {
+    const stmt = this.db.prepare(`
+      SELECT ts.*, s.script_path FROM test_stats ts
+      JOIN test_scripts s ON ts.test_script_id = s.id
+      WHERE s.script_path = ?
+    `);
+    const row = stmt.get(testScriptPath) as any;
+
+    if (!row) return null;
+
+    return {
+      totalRuns: row.total_runs,
+      totalPasses: row.total_passes,
+      totalFailures: row.total_failures,
+      avgDurationMs: row.avg_duration_ms,
+      failureRate: row.total_runs > 0 ? row.total_failures / row.total_runs : 0,
+      recentFailureRate: row.recent_failure_rate || 0,
+      failureStreak: row.failure_streak,
+      lastFailureDate: row.last_failure_date,
+    };
+  }
+
+  /**
+   * Get failure probability for a test based on changed files
+   */
+  getFailureProbability(testScriptPath: string, changedFiles: string[]): number {
+    if (changedFiles.length === 0) return 0;
+
+    // Get test ID
+    const testStmt = this.db.prepare('SELECT id FROM test_scripts WHERE script_path = ?');
+    const testRow = testStmt.get(testScriptPath) as { id: number } | undefined;
+    if (!testRow) return 0;
+
+    // Get correlation scores for changed files
+    const sourceIds: number[] = [];
+    for (const filePath of changedFiles) {
+      const sourceId = this.getSourceFileId(filePath);
+      if (sourceId) sourceIds.push(sourceId);
+    }
+
+    if (sourceIds.length === 0) return 0;
+
+    const placeholders = sourceIds.map(() => '?').join(',');
+    const correlationStmt = this.db.prepare(`
+      SELECT MAX(correlation_score) as max_score, AVG(correlation_score) as avg_score
+      FROM failure_correlations
+      WHERE source_file_id IN (${placeholders}) AND test_script_id = ?
+    `);
+    const correlationRow = correlationStmt.get(...sourceIds, testRow.id) as {
+      max_score: number | null;
+      avg_score: number | null;
+    };
+
+    // Also factor in recent failure rate
+    const statsStmt = this.db.prepare('SELECT recent_failure_rate FROM test_stats WHERE test_script_id = ?');
+    const statsRow = statsStmt.get(testRow.id) as { recent_failure_rate: number } | undefined;
+    const recentFailureRate = statsRow?.recent_failure_rate || 0;
+
+    // Combine correlation and recent failure rate
+    const correlationScore = correlationRow?.max_score || 0;
+    const combinedProbability = 0.6 * correlationScore + 0.4 * recentFailureRate;
+
+    return Math.min(1, combinedProbability);
+  }
+
+  /**
+   * Get smart test recommendations with priority scores
+   */
+  getSmartRecommendations(changedFiles: string[]): Array<{
+    testPath: string;
+    priorityScore: number;
+    failureProbability: number;
+    estimatedDurationMs: number | null;
+    coverageScore: number;
+    recentFailureRate: number;
+    reasons: string[];
+  }> {
+    if (changedFiles.length === 0) return [];
+
+    // Get all tests covering the changed files
+    const tests = this.getTestsForSources(changedFiles);
+
+    const recommendations: Array<{
+      testPath: string;
+      priorityScore: number;
+      failureProbability: number;
+      estimatedDurationMs: number | null;
+      coverageScore: number;
+      recentFailureRate: number;
+      reasons: string[];
+    }> = [];
+
+    for (const testPath of tests) {
+      const reasons: string[] = [];
+
+      // Get failure probability
+      const failureProbability = this.getFailureProbability(testPath, changedFiles);
+      if (failureProbability > 0.5) {
+        reasons.push(`High failure correlation (${(failureProbability * 100).toFixed(0)}%)`);
+      }
+
+      // Get test stats
+      const stats = this.getTestStats(testPath);
+      const recentFailureRate = stats?.recentFailureRate || 0;
+      const estimatedDurationMs = stats?.avgDurationMs ?? null;
+
+      if (recentFailureRate > 0.3) {
+        reasons.push(`Recent failures (${(recentFailureRate * 100).toFixed(0)}% rate)`);
+      }
+
+      if (stats?.failureStreak && stats.failureStreak > 0) {
+        reasons.push(`Currently failing (${stats.failureStreak} consecutive)`);
+      }
+
+      // Calculate coverage score (how many changed files this test covers)
+      const coverageScore = this.calculateCoverageScore(testPath, changedFiles);
+      if (coverageScore > 0.7) {
+        reasons.push(`High coverage of changes (${(coverageScore * 100).toFixed(0)}%)`);
+      }
+
+      // Calculate priority score
+      // Higher = should run first
+      // Factors: failure probability, recent failure rate, coverage score, duration (shorter = higher priority)
+      let priorityScore = 0;
+      priorityScore += failureProbability * 40;      // Max 40 points for failure probability
+      priorityScore += recentFailureRate * 25;       // Max 25 points for recent failures
+      priorityScore += coverageScore * 25;           // Max 25 points for coverage
+      // Duration factor: shorter tests get higher priority (max 10 points)
+      if (estimatedDurationMs !== null) {
+        const durationFactor = Math.max(0, 1 - estimatedDurationMs / 60000); // 1 minute = baseline
+        priorityScore += durationFactor * 10;
+      }
+
+      if (reasons.length === 0) {
+        reasons.push('Covers changed files');
+      }
+
+      recommendations.push({
+        testPath,
+        priorityScore,
+        failureProbability,
+        estimatedDurationMs,
+        coverageScore,
+        recentFailureRate,
+        reasons,
+      });
+    }
+
+    // Sort by priority score (highest first)
+    return recommendations.sort((a, b) => b.priorityScore - a.priorityScore);
+  }
+
+  /**
+   * Calculate how much of the changed files a test covers
+   */
+  private calculateCoverageScore(testPath: string, changedFiles: string[]): number {
+    const testStmt = this.db.prepare('SELECT id FROM test_scripts WHERE script_path = ?');
+    const testRow = testStmt.get(testPath) as { id: number } | undefined;
+    if (!testRow) return 0;
+
+    let coveredCount = 0;
+    for (const filePath of changedFiles) {
+      const sourceId = this.getSourceFileId(filePath);
+      if (!sourceId) continue;
+
+      const mappingStmt = this.db.prepare(`
+        SELECT 1 FROM coverage_map WHERE source_file_id = ? AND test_script_id = ?
+      `);
+      const mapping = mappingStmt.get(sourceId, testRow.id);
+      if (mapping) coveredCount++;
+    }
+
+    return changedFiles.length > 0 ? coveredCount / changedFiles.length : 0;
+  }
+
+  /**
+   * Batch record test results (for CI integration)
+   */
+  batchRecordTestResults(results: Array<{
+    testPath: string;
+    passed: boolean;
+    durationMs?: number;
+  }>, commitHash?: string, changedFiles?: string[]): void {
+    const insertMany = this.db.transaction(() => {
+      for (const result of results) {
+        this.recordTestResult(
+          result.testPath,
+          result.passed,
+          result.durationMs,
+          commitHash,
+          changedFiles
+        );
+      }
+    });
+    insertMany();
+  }
+
+  /**
+   * Get estimated total duration for a set of tests
+   */
+  getEstimatedDuration(testPaths: string[]): {
+    totalMs: number;
+    breakdown: Array<{ testPath: string; estimatedMs: number | null }>;
+  } {
+    let totalMs = 0;
+    const breakdown: Array<{ testPath: string; estimatedMs: number | null }> = [];
+
+    for (const testPath of testPaths) {
+      const stats = this.getTestStats(testPath);
+      const estimatedMs = stats?.avgDurationMs ?? null;
+      breakdown.push({ testPath, estimatedMs });
+      if (estimatedMs !== null) {
+        totalMs += estimatedMs;
+      }
+    }
+
+    return { totalMs, breakdown };
+  }
+
+  /**
+   * Get tests most likely to fail based on historical data
+   */
+  getMostLikelyToFail(limit = 10): Array<{
+    testPath: string;
+    recentFailureRate: number;
+    failureStreak: number;
+    lastFailureDate: string | null;
+  }> {
+    const stmt = this.db.prepare(`
+      SELECT ts.script_path, s.recent_failure_rate, s.failure_streak, s.last_failure_date
+      FROM test_stats s
+      JOIN test_scripts ts ON s.test_script_id = ts.id
+      WHERE s.recent_failure_rate > 0
+      ORDER BY s.recent_failure_rate DESC, s.failure_streak DESC
+      LIMIT ?
+    `);
+
+    const rows = stmt.all(limit) as any[];
+    return rows.map(row => ({
+      testPath: row.script_path,
+      recentFailureRate: row.recent_failure_rate,
+      failureStreak: row.failure_streak,
+      lastFailureDate: row.last_failure_date,
+    }));
+  }
+
+  /**
+   * Get smart recommendation statistics
+   */
+  getSmartStats(): {
+    testsWithHistory: number;
+    totalHistoryRecords: number;
+    correlationsTracked: number;
+    avgFailureRate: number;
+  } {
+    const testsWithHistory = (this.db.prepare('SELECT COUNT(*) as cnt FROM test_stats').get() as { cnt: number }).cnt;
+    const totalHistory = (this.db.prepare('SELECT COUNT(*) as cnt FROM test_history').get() as { cnt: number }).cnt;
+    const correlations = (this.db.prepare('SELECT COUNT(*) as cnt FROM failure_correlations').get() as { cnt: number }).cnt;
+    const avgFailure = (this.db.prepare('SELECT AVG(recent_failure_rate) as avg FROM test_stats').get() as { avg: number | null }).avg || 0;
+
+    return {
+      testsWithHistory,
+      totalHistoryRecords: totalHistory,
+      correlationsTracked: correlations,
+      avgFailureRate: avgFailure,
+    };
   }
 }
 

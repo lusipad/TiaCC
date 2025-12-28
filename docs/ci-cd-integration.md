@@ -596,6 +596,144 @@ tia-mapper update -c ./coverage -v
 - **Accurate tracking**: Modified tests automatically update their mappings
 - **Cleanup**: `--purge` option removes mappings for deleted tests
 
+## Smart Recommendations (Phase 4)
+
+TiaCC can prioritize tests based on historical data, predicting which tests are most likely to fail and estimating test durations.
+
+### How It Works
+
+1. **Test History Tracking**: Record test execution results (pass/fail, duration)
+2. **Failure Correlation**: Track which source file changes correlate with test failures
+3. **Priority Scoring**: Combine multiple factors to prioritize tests:
+   - Failure probability based on historical correlation (40%)
+   - Recent failure rate using exponential moving average (25%)
+   - Coverage score of changed files (25%)
+   - Duration factor (shorter tests get higher priority) (10%)
+
+### Recording Test Results
+
+Record test results after each CI run to build up historical data:
+
+```bash
+# Record a single test result
+tia-recommend record -t "TestClass::test_method" --passed --duration 1500
+
+# Record from JUnit XML file
+tia-recommend record --from-junit ./test-results.xml --commit abc123
+
+# Record from JSON file
+tia-recommend record --from-file ./results.json --changed-files src/main.cpp
+```
+
+#### JSON Format
+
+```json
+{
+  "commitHash": "abc123",
+  "changedFiles": ["src/main.cpp", "src/utils.cpp"],
+  "results": [
+    { "testPath": "TestClass::test_method", "passed": true, "durationMs": 1500 },
+    { "testPath": "TestClass::test_other", "passed": false, "durationMs": 2000 }
+  ]
+}
+```
+
+### Using Smart Recommendations
+
+```bash
+# Get smart recommendations (sorted by priority)
+tia-recommend --smart
+
+# Show failure probability and duration
+tia-recommend --smart --show-probability --show-duration
+
+# Get top 10 most important tests
+tia-recommend --smart --top 10
+
+# Only show tests with high failure probability
+tia-recommend --smart --min-probability 0.5
+
+# Show flaky tests (regardless of current changes)
+tia-recommend --flaky --top 20
+
+# View smart statistics
+tia-recommend stats
+```
+
+### CI/CD Integration
+
+```yaml
+# GitHub Actions - with smart recommendations
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download TiaCC database
+        uses: actions/cache@v4
+        with:
+          path: impact_map.db
+          key: tiacc-${{ runner.os }}-${{ github.sha }}
+          restore-keys: tiacc-${{ runner.os }}-
+
+      # Get smart recommendations
+      - name: Get recommended tests
+        run: |
+          tia-recommend --smart --top 50 -o affected-tests.txt
+          cat affected-tests.txt
+
+      - name: Run prioritized tests
+        run: |
+          if [ -s affected-tests.txt ]; then
+            npm test -- --grep "$(cat affected-tests.txt | tr '\n' '|' | sed 's/|$//')"
+          else
+            npm test
+          fi
+
+      # Record test results for future predictions
+      - name: Record test results
+        if: always()
+        run: |
+          tia-recommend record --from-junit ./test-results.xml \
+            --commit ${{ github.sha }} \
+            --changed-files $(git diff --name-only ${{ github.event.before }}..${{ github.sha }})
+```
+
+### Priority Badges
+
+Smart recommendations display priority badges:
+- 🔴 **HIGH** (score >= 70): Tests with high failure probability or recent failures
+- 🟡 **MEDIUM** (score >= 40): Tests with moderate risk
+- 🟢 **LOW** (score < 40): Tests with lower failure probability
+
+### Example Output
+
+```
+Smart Test Recommendations (sorted by priority):
+
+  ├─ DatabaseTest::test_connection 🔴 HIGH
+  │     Priority Score: 85.2/100
+  │     Failure Probability: 72.5%
+  │     Estimated Duration: 2.5s
+  │     Reasons: High failure correlation (73%), Recent failures (45% rate)
+
+  ├─ UserService::test_create 🟡 MEDIUM
+  │     Priority Score: 52.1/100
+  │     Reasons: High coverage of changes (80%)
+
+  └─ Utils::test_format 🟢 LOW
+        Priority Score: 25.0/100
+        Reasons: Covers changed files
+
+============================================================
+Summary: 3 tests recommended
+Estimated total duration: 5.2s
+Priority breakdown: 1 high, 1 medium, 1 low
+```
+
 ## Best Practices
 
 1. **Nightly Builds**: Run full test suites with coverage collection nightly to keep the mapping database up to date.
@@ -607,6 +745,12 @@ tia-mapper update -c ./coverage -v
 4. **Coverage Thresholds**: Combine TiaCC with coverage thresholds to ensure PR tests still maintain coverage.
 
 5. **Monorepo Support**: For monorepos, use path-based filtering to only analyze relevant projects.
+
+6. **Record Test Results**: Always record test results (especially failures) to improve smart recommendation accuracy over time.
+
+7. **Use Smart Mode**: Once you have historical data, use `--smart` mode to prioritize tests that are more likely to fail.
+
+8. **Monitor Flaky Tests**: Regularly check `tia-recommend --flaky` to identify and fix unstable tests.
 
 ## Troubleshooting
 
