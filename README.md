@@ -198,8 +198,9 @@ npx tsx src/cli/mapper.ts query calculator.cpp --db impact_map.db
 
 | 类型 | 支持 |
 |------|------|
-| **语言** | C++ (LLVM), C# (Coverlet) |
-| **测试框架** | Lua, Python, C#, TypeScript, Go |
+| **语言** | C++ (LLVM), C# (Coverlet/.NET), Java (JaCoCo), Python (coverage.py), JavaScript/TypeScript (Istanbul/nyc), Lua (LuaCov) |
+| **覆盖率格式** | LLVM Profile, Coverlet, Cobertura, OpenCppCoverage, LCOV/gcov, JaCoCo, Istanbul, dotCover, LuaCov |
+| **测试框架** | Lua, Python, C#, TypeScript, Go, Java 及其他支持标准覆盖率格式的框架 |
 | **平台** | Windows, Linux, macOS |
 | **分析级别** | 文件级、函数级 |
 
