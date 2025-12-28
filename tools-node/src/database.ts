@@ -386,7 +386,7 @@ export class TiaDatabase {
    */
   getLatestRun(): CoverageRun | null {
     const stmt = this.db.prepare(`
-      SELECT * FROM coverage_runs ORDER BY run_date DESC LIMIT 1
+      SELECT * FROM coverage_runs ORDER BY run_date DESC, id DESC LIMIT 1
     `);
     const row = stmt.get() as any;
 
