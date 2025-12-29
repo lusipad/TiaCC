@@ -36,6 +36,52 @@ npm run build
 npm link  # 创建全局命令
 ```
 
+### 离线环境安装
+
+本工具依赖 `better-sqlite3`，这是一个需要编译原生代码的 npm 包。在离线环境中安装需要额外步骤：
+
+#### 方法 1: 使用 npm 镜像（推荐）
+
+```bash
+# 设置 npm 镜像
+npm config set registry https://registry.npmmirror.com
+
+# 设置 better-sqlite3 预编译二进制镜像
+npm config set better_sqlite3_binary_host https://npmmirror.com/mirrors/better-sqlite3
+
+# 然后正常安装
+npm install
+```
+
+#### 方法 2: 预先下载二进制文件
+
+在有网络的环境中：
+
+```bash
+# 下载预编译二进制到本地
+npm install better-sqlite3
+# 将 node_modules/better-sqlite3/prebuilds 目录打包
+```
+
+在离线环境中：
+
+```bash
+# 解压预编译二进制到项目目录
+# 然后运行
+npm install --ignore-scripts
+```
+
+#### 方法 3: 本地编译（需要编译工具链）
+
+```bash
+# 确保安装了编译工具
+# Ubuntu/Debian: apt-get install build-essential python3
+# macOS: xcode-select --install
+# Windows: npm install -g windows-build-tools
+
+npm install --build-from-source
+```
+
 ## 快速开始
 
 ### 高层 API（推荐）

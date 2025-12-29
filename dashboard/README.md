@@ -168,9 +168,33 @@ vercel --prod dashboard
 
 ## 技术栈
 
-- **D3.js v7** - 数据可视化
+- **D3.js v7** - 数据可视化（本地 lib/d3.v7.min.js）
+- **Tailwind CSS** - 样式框架（本地 lib/tailwind.min.css）
 - **纯 JavaScript** - 无需构建工具
-- **Bootstrap Icons** - 图标库
+
+## 离线使用
+
+Dashboard 支持完全离线使用，所有依赖已本地化：
+
+```
+dashboard/
+├── lib/
+│   ├── d3.v7.min.js        # D3.js v7 本地副本
+│   └── tailwind.min.css    # Tailwind CSS 预编译样式
+├── data/                    # 数据文件
+└── index.html              # 主页面
+```
+
+### 更新本地依赖
+
+如需更新本地依赖库：
+
+```bash
+cd dashboard
+npm install
+npx tailwindcss -i input.css -o lib/tailwind.min.css --minify
+cp node_modules/d3/dist/d3.min.js lib/d3.v7.min.js
+```
 
 ## 示例项目
 

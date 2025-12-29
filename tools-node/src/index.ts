@@ -55,7 +55,8 @@ export type {
 } from './coverage-parser.js';
 export { GitUtils } from './git-utils.js';
 export { SymbolExtractor } from './symbol-extractor.js';
-export type { CoverageData, SourceFile, TestScript, CoverageMapping, DbStats } from './types.js';
+export { loadConfig, findConfigDir, mergeWithConfig, getProjectRoot } from './config.js';
+export type { CoverageData, SourceFile, TestScript, CoverageMapping, DbStats, ProjectConfig, ProjectPreset } from './types.js';
 
 // ============ Error handling ============
 export {

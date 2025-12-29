@@ -16,6 +16,7 @@
     }
   },
   "bin": {
+    "tiacc": "dist/cli/tiacc.js",
     "tia-mapper": "dist/cli/mapper.js",
     "tia-recommend": "dist/cli/recommend.js",
     "tia-split": "dist/cli/split.js",
