@@ -3,7 +3,10 @@
  */
 
 import Database from 'better-sqlite3';
-import type { DbStats, SourceFile, TestScript, CoverageRun, Symbol, SymbolType, CoveredSymbol, FunctionTestMapping } from './types.js';
+import type {
+  DbStats, SourceFile, TestScript, CoverageRun, Symbol, SymbolType, CoveredSymbol, FunctionTestMapping,
+  TestRun, TestResult, Tag, GitInfo, TrendDataPoint, ReportFilter, RunStatus, TriggerType, TestRunSummary
+} from './types.js';
 
 // ============ Path Utilities ============
 
@@ -171,6 +174,96 @@ CREATE TABLE IF NOT EXISTS failure_correlations (
 
 CREATE INDEX IF NOT EXISTS idx_failure_corr_source ON failure_correlations(source_file_id);
 CREATE INDEX IF NOT EXISTS idx_failure_corr_test ON failure_correlations(test_script_id);
+
+-- ============ Test Run & Results tables (Phase 5) ============
+
+-- Tags for categorizing test runs
+CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    category TEXT,
+    color TEXT,
+    description TEXT,
+    created_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
+CREATE INDEX IF NOT EXISTS idx_tags_category ON tags(category);
+
+-- Test runs (a collection of test results from a single execution)
+CREATE TABLE IF NOT EXISTS test_runs (
+    id INTEGER PRIMARY KEY,
+    run_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    total_tests INTEGER DEFAULT 0,
+    passed_tests INTEGER DEFAULT 0,
+    failed_tests INTEGER DEFAULT 0,
+    skipped_tests INTEGER DEFAULT 0,
+    total_duration_ms INTEGER DEFAULT 0,
+    environment TEXT,
+    trigger_type TEXT,
+    metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_test_runs_date ON test_runs(run_date);
+CREATE INDEX IF NOT EXISTS idx_test_runs_status ON test_runs(status);
+CREATE INDEX IF NOT EXISTS idx_test_runs_env ON test_runs(environment);
+
+-- Git information for test runs
+CREATE TABLE IF NOT EXISTS git_info (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER UNIQUE NOT NULL,
+    commit_hash TEXT NOT NULL,
+    branch TEXT,
+    author TEXT,
+    author_email TEXT,
+    commit_message TEXT,
+    commit_date TEXT,
+    parent_commits TEXT,
+    files_changed INTEGER,
+    insertions INTEGER,
+    deletions INTEGER,
+    FOREIGN KEY (run_id) REFERENCES test_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_info_run ON git_info(run_id);
+CREATE INDEX IF NOT EXISTS idx_git_info_commit ON git_info(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_git_info_branch ON git_info(branch);
+
+-- Association table for test runs and tags
+CREATE TABLE IF NOT EXISTS run_tags (
+    run_id INTEGER NOT NULL,
+    tag_id INTEGER NOT NULL,
+    PRIMARY KEY (run_id, tag_id),
+    FOREIGN KEY (run_id) REFERENCES test_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_tags_run ON run_tags(run_id);
+CREATE INDEX IF NOT EXISTS idx_run_tags_tag ON run_tags(tag_id);
+
+-- Individual test results within a run
+CREATE TABLE IF NOT EXISTS test_results (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    test_script_id INTEGER NOT NULL,
+    test_name TEXT,
+    passed INTEGER NOT NULL,
+    skipped INTEGER DEFAULT 0,
+    duration_ms INTEGER,
+    error_message TEXT,
+    stack_trace TEXT,
+    stdout TEXT,
+    stderr TEXT,
+    retry_count INTEGER DEFAULT 0,
+    metadata TEXT,
+    FOREIGN KEY (run_id) REFERENCES test_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY (test_script_id) REFERENCES test_scripts(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_test_results_run ON test_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_test ON test_results(test_script_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_passed ON test_results(passed);
 `;
 
 export class TiaDatabase {
@@ -1428,6 +1521,815 @@ export class TiaDatabase {
       totalHistoryRecords: totalHistory,
       correlationsTracked: correlations,
       avgFailureRate: avgFailure,
+    };
+  }
+
+  // ============ Tag Operations (Phase 5) ============
+
+  /**
+   * Create or get a tag by name
+   */
+  upsertTag(name: string, category?: string, color?: string, description?: string): number {
+    const now = new Date().toISOString();
+
+    const selectStmt = this.db.prepare('SELECT id FROM tags WHERE name = ?');
+    const row = selectStmt.get(name) as { id: number } | undefined;
+
+    if (row) {
+      // Update existing tag
+      const updateStmt = this.db.prepare(`
+        UPDATE tags SET category = COALESCE(?, category), color = COALESCE(?, color), description = COALESCE(?, description)
+        WHERE id = ?
+      `);
+      updateStmt.run(category ?? null, color ?? null, description ?? null, row.id);
+      return row.id;
+    }
+
+    // Insert new tag
+    const insertStmt = this.db.prepare(`
+      INSERT INTO tags (name, category, color, description, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const result = insertStmt.run(name, category ?? null, color ?? null, description ?? null, now);
+    return result.lastInsertRowid as number;
+  }
+
+  /**
+   * Get tag by name
+   */
+  getTagByName(name: string): Tag | null {
+    const stmt = this.db.prepare('SELECT * FROM tags WHERE name = ?');
+    const row = stmt.get(name) as any;
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      color: row.color,
+      description: row.description,
+    };
+  }
+
+  /**
+   * Get all tags, optionally filtered by category
+   */
+  getAllTags(category?: string): Tag[] {
+    let stmt;
+    if (category) {
+      stmt = this.db.prepare('SELECT * FROM tags WHERE category = ? ORDER BY name');
+      return (stmt.all(category) as any[]).map(row => ({
+        id: row.id,
+        name: row.name,
+        category: row.category,
+        color: row.color,
+        description: row.description,
+      }));
+    }
+
+    stmt = this.db.prepare('SELECT * FROM tags ORDER BY category, name');
+    return (stmt.all() as any[]).map(row => ({
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      color: row.color,
+      description: row.description,
+    }));
+  }
+
+  /**
+   * Delete a tag
+   */
+  deleteTag(name: string): boolean {
+    const stmt = this.db.prepare('DELETE FROM tags WHERE name = ?');
+    const result = stmt.run(name);
+    return result.changes > 0;
+  }
+
+  // ============ Test Run Operations (Phase 5) ============
+
+  /**
+   * Create a new test run
+   */
+  createTestRun(options: {
+    environment?: string;
+    triggerType?: TriggerType;
+    metadata?: Record<string, unknown>;
+  } = {}): number {
+    const now = new Date().toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO test_runs (run_date, status, environment, trigger_type, metadata)
+      VALUES (?, 'running', ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      now,
+      options.environment ?? null,
+      options.triggerType ?? null,
+      options.metadata ? JSON.stringify(options.metadata) : null
+    );
+
+    return result.lastInsertRowid as number;
+  }
+
+  /**
+   * Update test run status and statistics
+   */
+  updateTestRun(runId: number, updates: {
+    status?: RunStatus;
+    totalTests?: number;
+    passedTests?: number;
+    failedTests?: number;
+    skippedTests?: number;
+    totalDurationMs?: number;
+  }): void {
+    const setClauses: string[] = [];
+    const values: any[] = [];
+
+    if (updates.status !== undefined) {
+      setClauses.push('status = ?');
+      values.push(updates.status);
+    }
+    if (updates.totalTests !== undefined) {
+      setClauses.push('total_tests = ?');
+      values.push(updates.totalTests);
+    }
+    if (updates.passedTests !== undefined) {
+      setClauses.push('passed_tests = ?');
+      values.push(updates.passedTests);
+    }
+    if (updates.failedTests !== undefined) {
+      setClauses.push('failed_tests = ?');
+      values.push(updates.failedTests);
+    }
+    if (updates.skippedTests !== undefined) {
+      setClauses.push('skipped_tests = ?');
+      values.push(updates.skippedTests);
+    }
+    if (updates.totalDurationMs !== undefined) {
+      setClauses.push('total_duration_ms = ?');
+      values.push(updates.totalDurationMs);
+    }
+
+    if (setClauses.length === 0) return;
+
+    values.push(runId);
+    const stmt = this.db.prepare(`UPDATE test_runs SET ${setClauses.join(', ')} WHERE id = ?`);
+    stmt.run(...values);
+  }
+
+  /**
+   * Finalize a test run with final statistics
+   */
+  finalizeTestRun(runId: number): void {
+    // Calculate stats from test_results
+    const statsStmt = this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN passed = 1 AND skipped = 0 THEN 1 ELSE 0 END) as passed,
+        SUM(CASE WHEN passed = 0 AND skipped = 0 THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN skipped = 1 THEN 1 ELSE 0 END) as skipped,
+        SUM(duration_ms) as total_duration
+      FROM test_results WHERE run_id = ?
+    `);
+    const stats = statsStmt.get(runId) as any;
+
+    const status: RunStatus = stats.failed > 0 ? 'failed' : 'passed';
+
+    this.updateTestRun(runId, {
+      status,
+      totalTests: stats.total || 0,
+      passedTests: stats.passed || 0,
+      failedTests: stats.failed || 0,
+      skippedTests: stats.skipped || 0,
+      totalDurationMs: stats.total_duration || 0,
+    });
+  }
+
+  /**
+   * Get a test run by ID
+   */
+  getTestRun(runId: number): TestRun | null {
+    const stmt = this.db.prepare('SELECT * FROM test_runs WHERE id = ?');
+    const row = stmt.get(runId) as any;
+    if (!row) return null;
+
+    const gitInfo = this.getGitInfoForRun(runId);
+    const tags = this.getTagsForRun(runId);
+
+    return {
+      id: row.id,
+      runDate: row.run_date,
+      status: row.status as RunStatus,
+      totalTests: row.total_tests,
+      passedTests: row.passed_tests,
+      failedTests: row.failed_tests,
+      skippedTests: row.skipped_tests,
+      totalDurationMs: row.total_duration_ms,
+      environment: row.environment,
+      triggerType: row.trigger_type as TriggerType,
+      gitInfo: gitInfo ?? undefined,
+      tags,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    };
+  }
+
+  /**
+   * Add git information to a test run
+   */
+  addGitInfo(runId: number, gitInfo: GitInfo): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO git_info
+      (run_id, commit_hash, branch, author, author_email, commit_message, commit_date, parent_commits, files_changed, insertions, deletions)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      runId,
+      gitInfo.commitHash,
+      gitInfo.branch ?? null,
+      gitInfo.author ?? null,
+      gitInfo.authorEmail ?? null,
+      gitInfo.commitMessage ?? null,
+      gitInfo.commitDate ?? null,
+      gitInfo.parentCommits ? JSON.stringify(gitInfo.parentCommits) : null,
+      gitInfo.diffStats?.filesChanged ?? null,
+      gitInfo.diffStats?.insertions ?? null,
+      gitInfo.diffStats?.deletions ?? null
+    );
+  }
+
+  /**
+   * Get git info for a run
+   */
+  getGitInfoForRun(runId: number): GitInfo | null {
+    const stmt = this.db.prepare('SELECT * FROM git_info WHERE run_id = ?');
+    const row = stmt.get(runId) as any;
+    if (!row) return null;
+
+    return {
+      commitHash: row.commit_hash,
+      branch: row.branch,
+      author: row.author,
+      authorEmail: row.author_email,
+      commitMessage: row.commit_message,
+      commitDate: row.commit_date,
+      parentCommits: row.parent_commits ? JSON.parse(row.parent_commits) : undefined,
+      diffStats: row.files_changed !== null ? {
+        filesChanged: row.files_changed,
+        insertions: row.insertions,
+        deletions: row.deletions,
+      } : undefined,
+    };
+  }
+
+  /**
+   * Add tags to a test run
+   */
+  addTagsToRun(runId: number, tagNames: string[]): void {
+    const stmt = this.db.prepare('INSERT OR IGNORE INTO run_tags (run_id, tag_id) VALUES (?, ?)');
+
+    const insertMany = this.db.transaction((names: string[]) => {
+      for (const name of names) {
+        const tagId = this.upsertTag(name);
+        stmt.run(runId, tagId);
+      }
+    });
+
+    insertMany(tagNames);
+  }
+
+  /**
+   * Get tags for a run
+   */
+  getTagsForRun(runId: number): Tag[] {
+    const stmt = this.db.prepare(`
+      SELECT t.* FROM tags t
+      JOIN run_tags rt ON t.id = rt.tag_id
+      WHERE rt.run_id = ?
+      ORDER BY t.name
+    `);
+
+    return (stmt.all(runId) as any[]).map(row => ({
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      color: row.color,
+      description: row.description,
+    }));
+  }
+
+  /**
+   * Remove a tag from a run
+   */
+  removeTagFromRun(runId: number, tagName: string): void {
+    const tag = this.getTagByName(tagName);
+    if (!tag?.id) return;
+
+    const stmt = this.db.prepare('DELETE FROM run_tags WHERE run_id = ? AND tag_id = ?');
+    stmt.run(runId, tag.id);
+  }
+
+  // ============ Test Result Operations (Phase 5) ============
+
+  /**
+   * Add a test result to a run
+   */
+  addTestResult(result: {
+    runId: number;
+    testScriptPath: string;
+    testName?: string;
+    passed: boolean;
+    skipped?: boolean;
+    durationMs?: number;
+    errorMessage?: string;
+    stackTrace?: string;
+    stdout?: string;
+    stderr?: string;
+    retryCount?: number;
+    metadata?: Record<string, unknown>;
+  }): number {
+    // Get or create test script
+    const testScriptId = this.upsertTestScript(result.testScriptPath, result.durationMs);
+
+    const stmt = this.db.prepare(`
+      INSERT INTO test_results
+      (run_id, test_script_id, test_name, passed, skipped, duration_ms, error_message, stack_trace, stdout, stderr, retry_count, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertResult = stmt.run(
+      result.runId,
+      testScriptId,
+      result.testName ?? null,
+      result.passed ? 1 : 0,
+      result.skipped ? 1 : 0,
+      result.durationMs ?? null,
+      result.errorMessage ?? null,
+      result.stackTrace ?? null,
+      result.stdout ?? null,
+      result.stderr ?? null,
+      result.retryCount ?? 0,
+      result.metadata ? JSON.stringify(result.metadata) : null
+    );
+
+    // Also update the legacy test_history for backward compatibility
+    const gitInfo = this.getGitInfoForRun(result.runId);
+    this.recordTestResult(
+      result.testScriptPath,
+      result.passed,
+      result.durationMs,
+      gitInfo?.commitHash,
+      undefined
+    );
+
+    return insertResult.lastInsertRowid as number;
+  }
+
+  /**
+   * Batch add test results
+   */
+  batchAddTestResults(runId: number, results: Array<{
+    testScriptPath: string;
+    testName?: string;
+    passed: boolean;
+    skipped?: boolean;
+    durationMs?: number;
+    errorMessage?: string;
+    stackTrace?: string;
+  }>): void {
+    const insertMany = this.db.transaction(() => {
+      for (const result of results) {
+        this.addTestResult({ runId, ...result });
+      }
+    });
+    insertMany();
+  }
+
+  /**
+   * Get test results for a run
+   */
+  getTestResultsForRun(runId: number, filter?: { passed?: boolean; skipped?: boolean }): TestResult[] {
+    let sql = `
+      SELECT tr.*, ts.script_path
+      FROM test_results tr
+      JOIN test_scripts ts ON tr.test_script_id = ts.id
+      WHERE tr.run_id = ?
+    `;
+    const params: any[] = [runId];
+
+    if (filter?.passed !== undefined) {
+      sql += ' AND tr.passed = ?';
+      params.push(filter.passed ? 1 : 0);
+    }
+    if (filter?.skipped !== undefined) {
+      sql += ' AND tr.skipped = ?';
+      params.push(filter.skipped ? 1 : 0);
+    }
+
+    sql += ' ORDER BY tr.id';
+
+    const stmt = this.db.prepare(sql);
+    return (stmt.all(...params) as any[]).map(row => ({
+      id: row.id,
+      runId: row.run_id,
+      testScriptId: row.test_script_id,
+      testName: row.test_name,
+      passed: row.passed === 1,
+      skipped: row.skipped === 1,
+      durationMs: row.duration_ms,
+      errorMessage: row.error_message,
+      stackTrace: row.stack_trace,
+      stdout: row.stdout,
+      stderr: row.stderr,
+      retryCount: row.retry_count,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    }));
+  }
+
+  /**
+   * Get failed test results with error details
+   */
+  getFailedResults(runId: number): Array<TestResult & { scriptPath: string }> {
+    const stmt = this.db.prepare(`
+      SELECT tr.*, ts.script_path
+      FROM test_results tr
+      JOIN test_scripts ts ON tr.test_script_id = ts.id
+      WHERE tr.run_id = ? AND tr.passed = 0 AND tr.skipped = 0
+      ORDER BY tr.id
+    `);
+
+    return (stmt.all(runId) as any[]).map(row => ({
+      id: row.id,
+      runId: row.run_id,
+      testScriptId: row.test_script_id,
+      testName: row.test_name,
+      passed: false,
+      skipped: false,
+      durationMs: row.duration_ms,
+      errorMessage: row.error_message,
+      stackTrace: row.stack_trace,
+      stdout: row.stdout,
+      stderr: row.stderr,
+      retryCount: row.retry_count,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      scriptPath: row.script_path,
+    }));
+  }
+
+  // ============ Report & Trend Operations (Phase 5) ============
+
+  /**
+   * Get test runs with optional filtering
+   */
+  getTestRuns(filter?: ReportFilter, limit = 100, offset = 0): TestRun[] {
+    let sql = 'SELECT DISTINCT tr.* FROM test_runs tr';
+    const params: any[] = [];
+    const conditions: string[] = [];
+
+    // Join with git_info if filtering by branch
+    if (filter?.branch) {
+      sql += ' LEFT JOIN git_info gi ON tr.id = gi.run_id';
+      conditions.push('gi.branch = ?');
+      params.push(filter.branch);
+    }
+
+    // Join with run_tags if filtering by tags
+    if (filter?.tags && filter.tags.length > 0) {
+      sql += ' LEFT JOIN run_tags rt ON tr.id = rt.run_id';
+      sql += ' LEFT JOIN tags t ON rt.tag_id = t.id';
+      const placeholders = filter.tags.map(() => '?').join(',');
+      conditions.push(`t.name IN (${placeholders})`);
+      params.push(...filter.tags);
+    }
+
+    if (filter?.startDate) {
+      conditions.push('tr.run_date >= ?');
+      params.push(filter.startDate);
+    }
+    if (filter?.endDate) {
+      conditions.push('tr.run_date <= ?');
+      params.push(filter.endDate);
+    }
+    if (filter?.status) {
+      conditions.push('tr.status = ?');
+      params.push(filter.status);
+    }
+    if (filter?.environment) {
+      conditions.push('tr.environment = ?');
+      params.push(filter.environment);
+    }
+    if (filter?.triggerType) {
+      conditions.push('tr.trigger_type = ?');
+      params.push(filter.triggerType);
+    }
+
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    sql += ' ORDER BY tr.run_date DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
+
+    return rows.map(row => {
+      const gitInfo = this.getGitInfoForRun(row.id);
+      const tags = this.getTagsForRun(row.id);
+
+      return {
+        id: row.id,
+        runDate: row.run_date,
+        status: row.status as RunStatus,
+        totalTests: row.total_tests,
+        passedTests: row.passed_tests,
+        failedTests: row.failed_tests,
+        skippedTests: row.skipped_tests,
+        totalDurationMs: row.total_duration_ms,
+        environment: row.environment,
+        triggerType: row.trigger_type as TriggerType,
+        gitInfo: gitInfo ?? undefined,
+        tags,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      };
+    });
+  }
+
+  /**
+   * Get trend data for a time period
+   */
+  getTrend(filter?: ReportFilter, groupBy: 'day' | 'week' | 'month' = 'day'): TrendDataPoint[] {
+    let dateFormat: string;
+    switch (groupBy) {
+      case 'week':
+        dateFormat = '%Y-W%W';
+        break;
+      case 'month':
+        dateFormat = '%Y-%m';
+        break;
+      default:
+        dateFormat = '%Y-%m-%d';
+    }
+
+    let sql = `
+      SELECT
+        strftime('${dateFormat}', tr.run_date) as period,
+        COUNT(*) as run_count,
+        SUM(tr.total_tests) as total_tests,
+        SUM(tr.passed_tests) as passed_tests,
+        SUM(tr.failed_tests) as failed_tests,
+        AVG(tr.total_duration_ms) as avg_duration
+      FROM test_runs tr
+    `;
+
+    const params: any[] = [];
+    const conditions: string[] = [];
+
+    if (filter?.startDate) {
+      conditions.push('tr.run_date >= ?');
+      params.push(filter.startDate);
+    }
+    if (filter?.endDate) {
+      conditions.push('tr.run_date <= ?');
+      params.push(filter.endDate);
+    }
+    if (filter?.environment) {
+      conditions.push('tr.environment = ?');
+      params.push(filter.environment);
+    }
+    if (filter?.branch) {
+      sql += ' LEFT JOIN git_info gi ON tr.id = gi.run_id';
+      conditions.push('gi.branch = ?');
+      params.push(filter.branch);
+    }
+    if (filter?.tags && filter.tags.length > 0) {
+      sql += ' LEFT JOIN run_tags rt ON tr.id = rt.run_id';
+      sql += ' LEFT JOIN tags t ON rt.tag_id = t.id';
+      const placeholders = filter.tags.map(() => '?').join(',');
+      conditions.push(`t.name IN (${placeholders})`);
+      params.push(...filter.tags);
+    }
+
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    sql += ` GROUP BY period ORDER BY period`;
+
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
+
+    return rows.map(row => {
+      const totalTests = row.total_tests || 0;
+      const passedTests = row.passed_tests || 0;
+      return {
+        date: row.period,
+        passRate: totalTests > 0 ? (passedTests / totalTests) * 100 : 0,
+        totalTests,
+        failedTests: row.failed_tests || 0,
+        avgDurationMs: Math.round(row.avg_duration || 0),
+        runCount: row.run_count,
+      };
+    });
+  }
+
+  /**
+   * Get summary statistics
+   */
+  getRunSummary(filter?: ReportFilter): TestRunSummary {
+    let sql = `
+      SELECT
+        COUNT(*) as total_runs,
+        SUM(total_tests) as total_tests,
+        SUM(passed_tests) as passed_tests,
+        SUM(failed_tests) as failed_tests,
+        AVG(total_duration_ms) as avg_duration
+      FROM test_runs tr
+    `;
+
+    const params: any[] = [];
+    const conditions: string[] = [];
+
+    if (filter?.startDate) {
+      conditions.push('tr.run_date >= ?');
+      params.push(filter.startDate);
+    }
+    if (filter?.endDate) {
+      conditions.push('tr.run_date <= ?');
+      params.push(filter.endDate);
+    }
+    if (filter?.environment) {
+      conditions.push('tr.environment = ?');
+      params.push(filter.environment);
+    }
+
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    const stmt = this.db.prepare(sql);
+    const row = stmt.get(...params) as any;
+
+    const totalTests = row?.total_tests || 0;
+    const passedTests = row?.passed_tests || 0;
+
+    // Get flaky tests count (tests with mixed pass/fail in the period)
+    const flakyStmt = this.db.prepare(`
+      SELECT COUNT(DISTINCT test_script_id) as flaky_count
+      FROM test_results
+      WHERE run_id IN (SELECT id FROM test_runs WHERE run_date >= COALESCE(?, '1970-01-01') AND run_date <= COALESCE(?, '2100-01-01'))
+      GROUP BY test_script_id
+      HAVING SUM(passed) > 0 AND SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END) > 0
+    `);
+    const flakyRows = flakyStmt.all(filter?.startDate ?? null, filter?.endDate ?? null) as any[];
+
+    return {
+      totalRuns: row?.total_runs || 0,
+      totalTests,
+      passRate: totalTests > 0 ? (passedTests / totalTests) * 100 : 0,
+      avgDurationMs: Math.round(row?.avg_duration || 0),
+      failedTests: row?.failed_tests || 0,
+      flakyTests: flakyRows.length,
+    };
+  }
+
+  /**
+   * Compare two test runs
+   */
+  compareRuns(runId1: number, runId2: number): {
+    run1: TestRun | null;
+    run2: TestRun | null;
+    newFailures: string[];
+    fixedTests: string[];
+    newTests: string[];
+    removedTests: string[];
+    durationChange: number;
+  } {
+    const run1 = this.getTestRun(runId1);
+    const run2 = this.getTestRun(runId2);
+
+    // Get test results for both runs
+    const results1 = this.getTestResultsForRun(runId1);
+    const results2 = this.getTestResultsForRun(runId2);
+
+    const getTestKey = (r: TestResult) => {
+      const stmt = this.db.prepare('SELECT script_path FROM test_scripts WHERE id = ?');
+      const row = stmt.get(r.testScriptId) as { script_path: string } | undefined;
+      return `${row?.script_path}::${r.testName || ''}`;
+    };
+
+    const map1 = new Map(results1.map(r => [getTestKey(r), r]));
+    const map2 = new Map(results2.map(r => [getTestKey(r), r]));
+
+    const newFailures: string[] = [];
+    const fixedTests: string[] = [];
+    const newTests: string[] = [];
+    const removedTests: string[] = [];
+
+    // Find new failures and fixed tests
+    for (const [key, r2] of map2) {
+      const r1 = map1.get(key);
+      if (!r1) {
+        newTests.push(key);
+      } else if (r1.passed && !r2.passed) {
+        newFailures.push(key);
+      } else if (!r1.passed && r2.passed) {
+        fixedTests.push(key);
+      }
+    }
+
+    // Find removed tests
+    for (const key of map1.keys()) {
+      if (!map2.has(key)) {
+        removedTests.push(key);
+      }
+    }
+
+    const durationChange = (run2?.totalDurationMs ?? 0) - (run1?.totalDurationMs ?? 0);
+
+    return {
+      run1,
+      run2,
+      newFailures,
+      fixedTests,
+      newTests,
+      removedTests,
+      durationChange,
+    };
+  }
+
+  /**
+   * Get runs by tag
+   */
+  getRunsByTag(tagName: string, limit = 50): TestRun[] {
+    return this.getTestRuns({ tags: [tagName] }, limit);
+  }
+
+  /**
+   * Get runs by commit hash
+   */
+  getRunsByCommit(commitHash: string): TestRun[] {
+    const stmt = this.db.prepare(`
+      SELECT tr.* FROM test_runs tr
+      JOIN git_info gi ON tr.id = gi.run_id
+      WHERE gi.commit_hash = ? OR gi.commit_hash LIKE ?
+      ORDER BY tr.run_date DESC
+    `);
+
+    const rows = stmt.all(commitHash, `${commitHash}%`) as any[];
+
+    return rows.map(row => {
+      const gitInfo = this.getGitInfoForRun(row.id);
+      const tags = this.getTagsForRun(row.id);
+
+      return {
+        id: row.id,
+        runDate: row.run_date,
+        status: row.status as RunStatus,
+        totalTests: row.total_tests,
+        passedTests: row.passed_tests,
+        failedTests: row.failed_tests,
+        skippedTests: row.skipped_tests,
+        totalDurationMs: row.total_duration_ms,
+        environment: row.environment,
+        triggerType: row.trigger_type as TriggerType,
+        gitInfo: gitInfo ?? undefined,
+        tags,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      };
+    });
+  }
+
+  /**
+   * Delete old test runs (cleanup)
+   */
+  deleteOldRuns(beforeDate: string): number {
+    const stmt = this.db.prepare('DELETE FROM test_runs WHERE run_date < ?');
+    const result = stmt.run(beforeDate);
+    return result.changes;
+  }
+
+  /**
+   * Get report statistics for Phase 5
+   */
+  getReportStats(): {
+    totalRuns: number;
+    totalResults: number;
+    totalTags: number;
+    runsWithGitInfo: number;
+  } {
+    const runs = (this.db.prepare('SELECT COUNT(*) as cnt FROM test_runs').get() as { cnt: number }).cnt;
+    const results = (this.db.prepare('SELECT COUNT(*) as cnt FROM test_results').get() as { cnt: number }).cnt;
+    const tags = (this.db.prepare('SELECT COUNT(*) as cnt FROM tags').get() as { cnt: number }).cnt;
+    const withGit = (this.db.prepare('SELECT COUNT(*) as cnt FROM git_info').get() as { cnt: number }).cnt;
+
+    return {
+      totalRuns: runs,
+      totalResults: results,
+      totalTags: tags,
+      runsWithGitInfo: withGit,
     };
   }
 }

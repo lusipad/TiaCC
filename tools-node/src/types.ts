@@ -104,6 +104,107 @@ export interface TiaConfig {
   testExtensions: string[];
 }
 
+// ============ Test Run & Results types (Phase 5) ============
+
+/** Trigger type for test runs */
+export type TriggerType = 'manual' | 'push' | 'pull_request' | 'schedule' | 'api' | 'other';
+
+/** Test run status */
+export type RunStatus = 'running' | 'passed' | 'failed' | 'cancelled' | 'timeout';
+
+/** Git information for a test run */
+export interface GitInfo {
+  commitHash: string;
+  branch?: string;
+  author?: string;
+  authorEmail?: string;
+  commitMessage?: string;
+  commitDate?: string;
+  parentCommits?: string[];
+  diffStats?: {
+    filesChanged: number;
+    insertions: number;
+    deletions: number;
+  };
+}
+
+/** Tag for categorizing test runs */
+export interface Tag {
+  id?: number;
+  name: string;
+  category?: string;  // e.g., 'version', 'environment', 'build', 'custom'
+  color?: string;     // hex color for UI display
+  description?: string;
+}
+
+/** A complete test run (collection of test results) */
+export interface TestRun {
+  id?: number;
+  runDate: string;
+  status: RunStatus;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  skippedTests: number;
+  totalDurationMs: number;
+  environment?: string;
+  triggerType?: TriggerType;
+  gitInfo?: GitInfo;
+  tags?: Tag[];
+  metadata?: Record<string, unknown>;
+}
+
+/** Individual test result within a run */
+export interface TestResult {
+  id?: number;
+  runId: number;
+  testScriptId: number;
+  testName?: string;        // specific test case name within script
+  passed: boolean;
+  skipped?: boolean;
+  durationMs?: number;
+  errorMessage?: string;
+  stackTrace?: string;
+  stdout?: string;
+  stderr?: string;
+  retryCount?: number;
+  metadata?: Record<string, unknown>;
+}
+
+/** Summary statistics for reports */
+export interface TestRunSummary {
+  totalRuns: number;
+  totalTests: number;
+  passRate: number;
+  avgDurationMs: number;
+  failedTests: number;
+  flakyTests: number;
+}
+
+/** Trend data point for charts */
+export interface TrendDataPoint {
+  date: string;
+  passRate: number;
+  totalTests: number;
+  failedTests: number;
+  avgDurationMs: number;
+  runCount: number;
+}
+
+/** Report filter options */
+export interface ReportFilter {
+  startDate?: string;
+  endDate?: string;
+  tags?: string[];
+  branch?: string;
+  status?: RunStatus;
+  environment?: string;
+  triggerType?: TriggerType;
+}
+
+/** Report export format */
+export type ExportFormat = 'json' | 'csv' | 'html' | 'markdown';
+
 // ============ Project Configuration (.tiacc/config.json) ============
 
 export type ProjectPreset = 'dotnet' | 'cpp' | 'typescript' | 'java' | 'python' | 'lua' | 'custom';
