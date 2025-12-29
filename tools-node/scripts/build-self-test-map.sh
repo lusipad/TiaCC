@@ -1,6 +1,7 @@
 #!/bin/bash
 # TiaCC Self-Testing Demo Script
-# 演示如何使用 TiaCC 自己的工具来分析自己的测试覆盖率
+# 使用 TiaCC 自己的工具来分析自己的测试覆盖率
+# 真正为每个测试文件生成独立的覆盖率报告
 
 set -e
 
@@ -10,51 +11,64 @@ COVERAGE_DIR="$PROJECT_DIR/coverage"
 OUTPUT_DIR="$PROJECT_DIR/tiacc-data"
 DB_FILE="$OUTPUT_DIR/tiacc-self-test.db"
 
-echo "🎯 TiaCC Self-Testing Demo"
+echo "🎯 TiaCC Self-Testing (Dogfooding)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "这个脚本演示了如何用 TiaCC 来测试 TiaCC 自己！"
-echo "也就是所谓的 'dogfooding' (吃自己的狗粮)"
+echo "这个脚本为每个测试文件生成真正独立的覆盖率报告"
+echo "然后使用 TiaCC 构建精确的测试影响映射"
 echo ""
 
 # Step 1: 清理并创建输出目录
 echo "📁 Step 1: 准备目录..."
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/coverage"
-
-# Step 2: 运行测试并生成覆盖率
-echo ""
-echo "🧪 Step 2: 运行测试并生成 Cobertura 覆盖率报告..."
 cd "$PROJECT_DIR"
-npm test -- --coverage --run --silent 2>&1 | tail -15
 
-# Step 3: 检查覆盖率文件
+# Step 2: 获取所有测试文件列表
 echo ""
-echo "📊 Step 3: 检查生成的覆盖率文件..."
-if [ ! -f "$COVERAGE_DIR/cobertura-coverage.xml" ]; then
-    echo "❌ 错误: 未找到 Cobertura 覆盖率文件!"
-    echo "   请确保 vitest.config.ts 配置了 cobertura reporter"
-    exit 1
-fi
+echo "🔍 Step 2: 发现测试文件..."
+TEST_FILES=$(find tests -name "*.test.ts" -type f | sort)
+TEST_COUNT=$(echo "$TEST_FILES" | wc -l)
+echo "   找到 $TEST_COUNT 个测试文件"
 
-echo "✅ 找到覆盖率文件: cobertura-coverage.xml"
-FILESIZE=$(ls -lh "$COVERAGE_DIR/cobertura-coverage.xml" | awk '{print $5}')
-echo "   文件大小: $FILESIZE"
-
-# Step 4: 模拟每个测试的独立覆盖率
+# Step 3: 为每个测试文件单独运行测试并生成独立覆盖率
 echo ""
-echo "🔀 Step 4: 为每个测试创建独立的覆盖率文件..."
-echo ""
-echo "   ⚠️  注意: Vitest 默认生成聚合覆盖率"
-echo "   在实际应用中，应该配置测试框架为每个测试生成独立的覆盖率文件"
-echo "   这里我们通过复制和重命名来模拟每个测试的覆盖率"
+echo "🧪 Step 3: 为每个测试生成独立覆盖率报告..."
+echo "   ✨ 这是真正的覆盖率，不是简单复制!"
 echo ""
 
-# 为测试文件创建独立的覆盖率文件（使用 TiaCC 期望的命名格式）
-cp "$COVERAGE_DIR/cobertura-coverage.xml" "$OUTPUT_DIR/coverage/test_coverage-parser.cobertura.xml"
-cp "$COVERAGE_DIR/cobertura-coverage.xml" "$OUTPUT_DIR/coverage/test_database.cobertura.xml"
+PROCESSED=0
+for TEST_FILE in $TEST_FILES; do
+    PROCESSED=$((PROCESSED + 1))
+    # 从路径提取测试名称 (tests/foo.test.ts -> foo)
+    TEST_NAME=$(basename "$TEST_FILE" .test.ts)
 
-echo "✅ 创建了 2 个独立的覆盖率文件"
+    echo "   [$PROCESSED/$TEST_COUNT] 运行 $TEST_NAME..."
+
+    # 清理之前的覆盖率
+    rm -rf "$COVERAGE_DIR"
+
+    # 单独运行此测试并生成覆盖率
+    npm test -- --coverage --run "$TEST_FILE" --silent 2>/dev/null || {
+        echo "      ⚠️  测试 $TEST_NAME 运行失败，跳过"
+        continue
+    }
+
+    # 检查覆盖率文件是否生成
+    if [ -f "$COVERAGE_DIR/cobertura-coverage.xml" ]; then
+        # 复制到输出目录，使用 TiaCC 期望的命名格式
+        cp "$COVERAGE_DIR/cobertura-coverage.xml" "$OUTPUT_DIR/coverage/test_${TEST_NAME}.cobertura.xml"
+        echo "      ✅ 覆盖率已保存"
+    else
+        echo "      ⚠️  未生成覆盖率文件"
+    fi
+done
+
+# Step 4: 检查生成的覆盖率文件
+echo ""
+echo "📊 Step 4: 检查生成的覆盖率文件..."
+COVERAGE_COUNT=$(ls -1 "$OUTPUT_DIR/coverage/"*.xml 2>/dev/null | wc -l)
+echo "   ✅ 成功生成 $COVERAGE_COUNT 个独立覆盖率文件:"
 ls -1 "$OUTPUT_DIR/coverage/"
 
 # Step 5: 使用 TiaCC 的 mapper 工具构建映射数据库

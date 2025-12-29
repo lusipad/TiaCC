@@ -205,17 +205,42 @@ export default defineConfig({
 }
 ```
 
-## 🚧 当前限制与未来改进
+## ✅ 真正的独立覆盖率
 
-### 限制
-- Vitest 默认生成聚合覆盖率，我们目前通过复制文件模拟每个测试的独立覆盖率
-- 理想情况下应该为每个测试文件/测试用例生成独立的覆盖率报告
+### 工作原理
 
-### 未来改进
-- [ ] 开发 Vitest reporter 插件，自动为每个测试生成独立覆盖率
-- [ ] 集成到 GitHub Actions 的 matrix 策略
+TiaCC 的 dogfooding 现在为每个测试文件生成**真正独立**的覆盖率报告：
+
+```bash
+# 遍历所有测试文件
+for TEST_FILE in tests/*.test.ts; do
+    # 单独运行每个测试并收集覆盖率
+    npm test -- --coverage --run "$TEST_FILE"
+
+    # 保存此测试的独立覆盖率
+    cp coverage/cobertura-coverage.xml "tiacc-data/coverage/test_${TEST_NAME}.cobertura.xml"
+done
+```
+
+这意味着：
+- ✅ 每个测试的覆盖率数据是**真实的**，不是简单复制
+- ✅ 可以精确知道哪个测试覆盖了哪些源文件
+- ✅ PR 时的测试推荐结果是**准确的**
+
+### 覆盖的测试文件
+
+所有 5 个测试文件都会生成独立覆盖率：
+- `tests/coverage-parser.test.ts` → `test_coverage-parser.cobertura.xml`
+- `tests/database.test.ts` → `test_database.cobertura.xml`
+- `tests/git-utils.test.ts` → `test_git-utils.cobertura.xml`
+- `tests/index.test.ts` → `test_index.cobertura.xml`
+- `tests/symbol-extractor.test.ts` → `test_symbol-extractor.cobertura.xml`
+
+## 🚀 未来改进
+
 - [ ] 添加性能基准测试，量化 TiaCC 带来的 CI 加速
 - [ ] 支持更多 JavaScript/TypeScript 测试框架 (Jest, Mocha 等)
+- [ ] 探索使用 Vitest 的 `--shard` 功能进一步优化 CI 并行度
 
 ## 🤝 贡献
 

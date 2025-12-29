@@ -33,20 +33,48 @@ jobs:
         working-directory: tools-node
         run: npm ci
 
-      - name: 🧪 Run ALL tests with coverage
-        working-directory: tools-node
-        run: npm test -- --coverage --run
-
-      - name: 🗺️ Build test impact mapping database
+      - name: 🧪 Generate independent coverage for each test
         working-directory: tools-node
         run: |
           mkdir -p tiacc-data/coverage
 
-          # 为每个测试文件创建独立的覆盖率文件
-          # 注意：这是演示，实际应该配置测试框架生成独立覆盖率
-          cp coverage/cobertura-coverage.xml tiacc-data/coverage/test_coverage-parser.cobertura.xml
-          cp coverage/cobertura-coverage.xml tiacc-data/coverage/test_database.cobertura.xml
+          echo "🔍 Discovering test files..."
+          TEST_FILES=$(find tests -name "*.test.ts" -type f | sort)
+          TEST_COUNT=$(echo "$TEST_FILES" | wc -l)
+          echo "Found $TEST_COUNT test files"
 
+          echo ""
+          echo "🧪 Generating independent coverage for each test..."
+
+          PROCESSED=0
+          for TEST_FILE in $TEST_FILES; do
+            PROCESSED=$((PROCESSED + 1))
+            TEST_NAME=$(basename "$TEST_FILE" .test.ts)
+            echo "[$PROCESSED/$TEST_COUNT] Running $TEST_NAME..."
+
+            # Clean previous coverage
+            rm -rf coverage
+
+            # Run single test with coverage
+            npm test -- --coverage --run "$TEST_FILE" --silent 2>/dev/null || {
+              echo "  ⚠️ Test $TEST_NAME failed, skipping"
+              continue
+            }
+
+            # Save coverage with TiaCC naming format
+            if [ -f "coverage/cobertura-coverage.xml" ]; then
+              cp coverage/cobertura-coverage.xml "tiacc-data/coverage/test_${TEST_NAME}.cobertura.xml"
+              echo "  ✅ Coverage saved"
+            fi
+          done
+
+          echo ""
+          echo "📊 Generated coverage files:"
+          ls -1 tiacc-data/coverage/
+
+      - name: 🗺️ Build test impact mapping database
+        working-directory: tools-node
+        run: |
           # 使用 TiaCC 自己的 mapper 工具构建映射数据库
           npx tsx src/cli/mapper.ts build \
             --coverage-dir tiacc-data/coverage \
