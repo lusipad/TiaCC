@@ -103,3 +103,42 @@ export interface TiaConfig {
   sourceExtensions: string[];
   testExtensions: string[];
 }
+
+// ============ Project Configuration (.tiacc/config.json) ============
+
+export type ProjectPreset = 'dotnet' | 'cpp' | 'typescript' | 'java' | 'python' | 'lua' | 'custom';
+
+export interface ProjectConfig {
+  /** Configuration version */
+  version: 1;
+  /** Project preset type */
+  preset: ProjectPreset;
+  /** Path to SQLite database (relative to .tiacc/) */
+  db: string;
+  /** Directory for coverage files (relative to .tiacc/) */
+  coverageDir: string;
+  /** Test project patterns */
+  testProjects?: string[];
+  /** Source file patterns to include */
+  sourcePatterns: string[];
+  /** Patterns to exclude */
+  excludePatterns: string[];
+  /** Base path to strip from file paths */
+  basePath?: string;
+  /** Coverage format options */
+  coverage?: {
+    /** Coverage format: coverlet, cobertura, llvm, istanbul, etc. */
+    format?: string;
+    /** Test ID extraction method */
+    testIdFrom?: 'filename' | 'env' | 'source';
+    /** Environment variable name for testId (when testIdFrom is 'env') */
+    testIdEnvVar?: string;
+  };
+  /** Build options */
+  build?: {
+    /** Number of parallel workers */
+    concurrency?: number;
+    /** Enable verbose output */
+    verbose?: boolean;
+  };
+}

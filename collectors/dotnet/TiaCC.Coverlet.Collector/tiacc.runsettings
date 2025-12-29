@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TiaCC Run Settings for .NET Tests
+
+  Usage:
+    dotnet test --settings:tiacc.runsettings
+
+  Or copy this file to your test project directory and customize.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <!-- TiaCC Coverage Collector -->
+      <DataCollector friendlyName="TiaCC Coverage"
+                     uri="datacollector://TiaCC/CoverageCollector/1.0">
+        <Configuration>
+          <!-- Output directory for coverage data (relative to test project) -->
+          <OutputDirectory>.tiacc/coverage</OutputDirectory>
+        </Configuration>
+      </DataCollector>
+
+      <!-- Coverlet (for actual code coverage) -->
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>json,cobertura</Format>
+          <ExcludeByFile>**/Migrations/**</ExcludeByFile>
+          <SingleHit>false</SingleHit>
+          <UseSourceLink>true</UseSourceLink>
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+
+  <!-- Test run parameters -->
+  <TestRunParameters>
+    <Parameter name="TiaCC.Enabled" value="true" />
+  </TestRunParameters>
+</RunSettings>
