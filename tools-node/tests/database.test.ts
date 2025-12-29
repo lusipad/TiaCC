@@ -474,3 +474,404 @@ describe('Incremental update operations', () => {
     expect(stats2.mappings).toBe(0);
   });
 });
+
+describe('Tag operations (Phase 5)', () => {
+  let tempDir: string;
+  let dbPath: string;
+  let db: TiaDatabase;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tiacc-test-'));
+    dbPath = join(tempDir, 'test.db');
+    db = initDatabase(dbPath);
+  });
+
+  afterEach(() => {
+    db.close();
+    if (existsSync(dbPath)) {
+      unlinkSync(dbPath);
+    }
+    rmdirSync(tempDir);
+  });
+
+  it('should create a new tag', () => {
+    const tagId = db.upsertTag('v1.0.0', 'version', '#00ff00');
+    expect(tagId).toBeGreaterThan(0);
+  });
+
+  it('should get tag by name', () => {
+    db.upsertTag('staging', 'environment', '#ff9900', 'Staging environment');
+
+    const tag = db.getTagByName('staging');
+    expect(tag).not.toBeNull();
+    expect(tag?.name).toBe('staging');
+    expect(tag?.category).toBe('environment');
+    expect(tag?.color).toBe('#ff9900');
+    expect(tag?.description).toBe('Staging environment');
+  });
+
+  it('should return null for non-existent tag', () => {
+    const tag = db.getTagByName('nonexistent');
+    expect(tag).toBeNull();
+  });
+
+  it('should get all tags', () => {
+    db.upsertTag('v1.0.0', 'version');
+    db.upsertTag('v2.0.0', 'version');
+    db.upsertTag('production', 'environment');
+
+    const allTags = db.getAllTags();
+    expect(allTags).toHaveLength(3);
+  });
+
+  it('should filter tags by category', () => {
+    db.upsertTag('v1.0.0', 'version');
+    db.upsertTag('v2.0.0', 'version');
+    db.upsertTag('production', 'environment');
+
+    const versionTags = db.getAllTags('version');
+    expect(versionTags).toHaveLength(2);
+    expect(versionTags.every(t => t.category === 'version')).toBe(true);
+  });
+
+  it('should delete a tag', () => {
+    db.upsertTag('temp-tag');
+    expect(db.getTagByName('temp-tag')).not.toBeNull();
+
+    const deleted = db.deleteTag('temp-tag');
+    expect(deleted).toBe(true);
+    expect(db.getTagByName('temp-tag')).toBeNull();
+  });
+});
+
+describe('Test run operations (Phase 5)', () => {
+  let tempDir: string;
+  let dbPath: string;
+  let db: TiaDatabase;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tiacc-test-'));
+    dbPath = join(tempDir, 'test.db');
+    db = initDatabase(dbPath);
+  });
+
+  afterEach(() => {
+    db.close();
+    if (existsSync(dbPath)) {
+      unlinkSync(dbPath);
+    }
+    rmdirSync(tempDir);
+  });
+
+  it('should create a new test run', () => {
+    const runId = db.createTestRun({
+      environment: 'CI',
+      triggerType: 'push',
+      metadata: { jobId: '12345' },
+    });
+
+    expect(runId).toBeGreaterThan(0);
+  });
+
+  it('should get test run by ID', () => {
+    const runId = db.createTestRun({ environment: 'local' });
+
+    const run = db.getTestRun(runId);
+    expect(run).not.toBeNull();
+    expect(run?.status).toBe('running');
+    expect(run?.environment).toBe('local');
+  });
+
+  it('should update test run status', () => {
+    const runId = db.createTestRun();
+
+    db.updateTestRun(runId, {
+      status: 'passed',
+      totalTests: 100,
+      passedTests: 95,
+      failedTests: 5,
+    });
+
+    const run = db.getTestRun(runId);
+    expect(run?.status).toBe('passed');
+    expect(run?.totalTests).toBe(100);
+    expect(run?.passedTests).toBe(95);
+    expect(run?.failedTests).toBe(5);
+  });
+
+  it('should add git info to run', () => {
+    const runId = db.createTestRun();
+
+    db.addGitInfo(runId, {
+      commitHash: 'abc123def',
+      branch: 'feature/test',
+      author: 'Test User',
+      authorEmail: 'test@example.com',
+      commitMessage: 'Add new feature',
+      diffStats: {
+        filesChanged: 5,
+        insertions: 100,
+        deletions: 20,
+      },
+    });
+
+    const run = db.getTestRun(runId);
+    expect(run?.gitInfo).not.toBeUndefined();
+    expect(run?.gitInfo?.commitHash).toBe('abc123def');
+    expect(run?.gitInfo?.branch).toBe('feature/test');
+    expect(run?.gitInfo?.diffStats?.filesChanged).toBe(5);
+  });
+
+  it('should add tags to run', () => {
+    const runId = db.createTestRun();
+
+    db.addTagsToRun(runId, ['v1.0.0', 'staging', 'nightly']);
+
+    const run = db.getTestRun(runId);
+    expect(run?.tags).toHaveLength(3);
+    expect(run?.tags?.some(t => t.name === 'v1.0.0')).toBe(true);
+    expect(run?.tags?.some(t => t.name === 'staging')).toBe(true);
+  });
+
+  it('should remove tag from run', () => {
+    const runId = db.createTestRun();
+    db.addTagsToRun(runId, ['tag1', 'tag2']);
+
+    db.removeTagFromRun(runId, 'tag1');
+
+    const tags = db.getTagsForRun(runId);
+    expect(tags).toHaveLength(1);
+    expect(tags[0].name).toBe('tag2');
+  });
+});
+
+describe('Test result operations (Phase 5)', () => {
+  let tempDir: string;
+  let dbPath: string;
+  let db: TiaDatabase;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tiacc-test-'));
+    dbPath = join(tempDir, 'test.db');
+    db = initDatabase(dbPath);
+  });
+
+  afterEach(() => {
+    db.close();
+    if (existsSync(dbPath)) {
+      unlinkSync(dbPath);
+    }
+    rmdirSync(tempDir);
+  });
+
+  it('should add test result', () => {
+    const runId = db.createTestRun();
+
+    const resultId = db.addTestResult({
+      runId,
+      testScriptPath: 'tests/test_main.lua',
+      testName: 'should work correctly',
+      passed: true,
+      durationMs: 150,
+    });
+
+    expect(resultId).toBeGreaterThan(0);
+  });
+
+  it('should add failed test result with error details', () => {
+    const runId = db.createTestRun();
+
+    db.addTestResult({
+      runId,
+      testScriptPath: 'tests/test_fail.lua',
+      testName: 'should not crash',
+      passed: false,
+      durationMs: 50,
+      errorMessage: 'AssertionError: expected 1 to equal 2',
+      stackTrace: 'at Test.fn (tests/test_fail.lua:15)\nat runTest...',
+    });
+
+    const results = db.getTestResultsForRun(runId);
+    expect(results).toHaveLength(1);
+    expect(results[0].passed).toBe(false);
+    expect(results[0].errorMessage).toBe('AssertionError: expected 1 to equal 2');
+    expect(results[0].stackTrace).toContain('test_fail.lua:15');
+  });
+
+  it('should get failed results', () => {
+    const runId = db.createTestRun();
+
+    db.addTestResult({ runId, testScriptPath: 'tests/pass1.lua', passed: true });
+    db.addTestResult({ runId, testScriptPath: 'tests/fail1.lua', passed: false, errorMessage: 'Error 1' });
+    db.addTestResult({ runId, testScriptPath: 'tests/pass2.lua', passed: true });
+    db.addTestResult({ runId, testScriptPath: 'tests/fail2.lua', passed: false, errorMessage: 'Error 2' });
+
+    const failed = db.getFailedResults(runId);
+    expect(failed).toHaveLength(2);
+    expect(failed.every(r => r.passed === false)).toBe(true);
+  });
+
+  it('should batch add test results', () => {
+    const runId = db.createTestRun();
+
+    db.batchAddTestResults(runId, [
+      { testScriptPath: 'tests/test1.lua', passed: true, durationMs: 100 },
+      { testScriptPath: 'tests/test2.lua', passed: true, durationMs: 200 },
+      { testScriptPath: 'tests/test3.lua', passed: false, durationMs: 50, errorMessage: 'Failed' },
+    ]);
+
+    const results = db.getTestResultsForRun(runId);
+    expect(results).toHaveLength(3);
+  });
+
+  it('should finalize test run', () => {
+    const runId = db.createTestRun();
+
+    db.batchAddTestResults(runId, [
+      { testScriptPath: 'tests/test1.lua', passed: true, durationMs: 100 },
+      { testScriptPath: 'tests/test2.lua', passed: true, durationMs: 200 },
+      { testScriptPath: 'tests/test3.lua', passed: false, durationMs: 50 },
+      { testScriptPath: 'tests/test4.lua', skipped: true, passed: false },
+    ]);
+
+    db.finalizeTestRun(runId);
+
+    const run = db.getTestRun(runId);
+    expect(run?.status).toBe('failed');
+    expect(run?.totalTests).toBe(4);
+    expect(run?.passedTests).toBe(2);
+    expect(run?.failedTests).toBe(1);
+    expect(run?.skippedTests).toBe(1);
+    expect(run?.totalDurationMs).toBe(350);
+  });
+});
+
+describe('Report and trend operations (Phase 5)', () => {
+  let tempDir: string;
+  let dbPath: string;
+  let db: TiaDatabase;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tiacc-test-'));
+    dbPath = join(tempDir, 'test.db');
+    db = initDatabase(dbPath);
+  });
+
+  afterEach(() => {
+    db.close();
+    if (existsSync(dbPath)) {
+      unlinkSync(dbPath);
+    }
+    rmdirSync(tempDir);
+  });
+
+  it('should get test runs with filter', () => {
+    const run1 = db.createTestRun({ environment: 'CI' });
+    const run2 = db.createTestRun({ environment: 'local' });
+    const run3 = db.createTestRun({ environment: 'CI' });
+
+    db.updateTestRun(run1, { status: 'passed' });
+    db.updateTestRun(run2, { status: 'passed' });
+    db.updateTestRun(run3, { status: 'failed' });
+
+    const ciRuns = db.getTestRuns({ environment: 'CI' });
+    expect(ciRuns).toHaveLength(2);
+
+    const failedRuns = db.getTestRuns({ status: 'failed' });
+    expect(failedRuns).toHaveLength(1);
+  });
+
+  it('should get runs by tag', () => {
+    const run1 = db.createTestRun();
+    const run2 = db.createTestRun();
+    const run3 = db.createTestRun();
+
+    db.addTagsToRun(run1, ['v1.0.0']);
+    db.addTagsToRun(run2, ['v1.0.0', 'nightly']);
+    db.addTagsToRun(run3, ['v2.0.0']);
+
+    const v1Runs = db.getRunsByTag('v1.0.0');
+    expect(v1Runs).toHaveLength(2);
+  });
+
+  it('should get runs by commit', () => {
+    const run1 = db.createTestRun();
+    const run2 = db.createTestRun();
+
+    db.addGitInfo(run1, { commitHash: 'abc123' });
+    db.addGitInfo(run2, { commitHash: 'def456' });
+
+    const runs = db.getRunsByCommit('abc123');
+    expect(runs).toHaveLength(1);
+    expect(runs[0].id).toBe(run1);
+  });
+
+  it('should get run summary', () => {
+    const run1 = db.createTestRun();
+    const run2 = db.createTestRun();
+
+    db.updateTestRun(run1, { totalTests: 100, passedTests: 90, failedTests: 10 });
+    db.updateTestRun(run2, { totalTests: 50, passedTests: 45, failedTests: 5 });
+
+    const summary = db.getRunSummary();
+    expect(summary.totalRuns).toBe(2);
+    expect(summary.totalTests).toBe(150);
+    expect(summary.failedTests).toBe(15);
+    expect(summary.passRate).toBeCloseTo(90, 0);
+  });
+
+  it('should compare two runs', () => {
+    const run1 = db.createTestRun();
+    const run2 = db.createTestRun();
+
+    db.addTestResult({ runId: run1, testScriptPath: 'tests/a.lua', testName: 'test1', passed: true });
+    db.addTestResult({ runId: run1, testScriptPath: 'tests/b.lua', testName: 'test2', passed: true });
+
+    db.addTestResult({ runId: run2, testScriptPath: 'tests/a.lua', testName: 'test1', passed: false }); // Now failing
+    db.addTestResult({ runId: run2, testScriptPath: 'tests/c.lua', testName: 'test3', passed: true }); // New test
+
+    const comparison = db.compareRuns(run1, run2);
+    expect(comparison.newFailures).toHaveLength(1);
+    expect(comparison.newTests).toHaveLength(1);
+    expect(comparison.removedTests).toHaveLength(1);
+  });
+
+  it('should get trend data', () => {
+    // Create runs on different dates (simulated)
+    const run1 = db.createTestRun();
+    const run2 = db.createTestRun();
+
+    db.updateTestRun(run1, { totalTests: 100, passedTests: 90, failedTests: 10 });
+    db.updateTestRun(run2, { totalTests: 100, passedTests: 95, failedTests: 5 });
+
+    const trend = db.getTrend();
+    expect(trend.length).toBeGreaterThan(0);
+    expect(trend[0].runCount).toBeGreaterThan(0);
+  });
+
+  it('should delete old runs', () => {
+    db.createTestRun();
+    db.createTestRun();
+
+    // Delete runs before year 2100 (all of them)
+    const futureDate = '2100-01-01';
+    const deleted = db.deleteOldRuns(futureDate);
+    expect(deleted).toBe(2);
+
+    const runs = db.getTestRuns();
+    expect(runs).toHaveLength(0);
+  });
+
+  it('should get report stats', () => {
+    const runId = db.createTestRun();
+    db.addGitInfo(runId, { commitHash: 'abc123' });
+    db.addTagsToRun(runId, ['v1.0.0']);
+    db.addTestResult({ runId, testScriptPath: 'tests/test.lua', passed: true });
+
+    const stats = db.getReportStats();
+    expect(stats.totalRuns).toBe(1);
+    expect(stats.totalResults).toBe(1);
+    expect(stats.totalTags).toBe(1);
+    expect(stats.runsWithGitInfo).toBe(1);
+  });
+});
