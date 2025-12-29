@@ -417,6 +417,31 @@
                         <div class="p-2 sticky top-0 bg-[#0f172a] z-10 space-y-2">
                             <input type="text" id="file-search" onkeyup="filterFiles()" placeholder="Filter files..."
                                 class="w-full bg-slate-800 border-none rounded-lg px-3 py-2 text-xs text-slate-300 focus:ring-1 focus:ring-indigo-500">
+                            <!-- Expansion level controls -->
+                            <div class="flex items-center gap-1">
+                                <span class="text-[10px] text-slate-500 mr-1" data-i18n="sidebar.expansionLevel">Expand:</span>
+                                <button onclick="setExpansionLevel('none')"
+                                    class="expansion-btn px-2 py-1 text-[10px] rounded bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300 transition"
+                                    data-level="none" data-i18n-title="sidebar.collapseAll" title="Collapse all folders">
+                                    <svg class="w-3 h-3 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
+                                    </svg>
+                                </button>
+                                <button onclick="setExpansionLevel('folders')"
+                                    class="expansion-btn px-2 py-1 text-[10px] rounded bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300 transition"
+                                    data-level="folders" data-i18n-title="sidebar.showFolders" title="Show folders only">
+                                    <svg class="w-3 h-3 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                                    </svg>
+                                </button>
+                                <button onclick="setExpansionLevel('files')"
+                                    class="expansion-btn px-2 py-1 text-[10px] rounded bg-indigo-500/30 text-indigo-300 hover:bg-indigo-500/50 transition"
+                                    data-level="files" data-i18n-title="sidebar.expandAll" title="Expand all files">
+                                    <svg class="w-3 h-3 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                    </svg>
+                                </button>
+                            </div>
                             <!-- Multi-select actions -->
                             <div class="flex items-center justify-between">
                                 <label
@@ -669,7 +694,12 @@
                     'heatmap.tests': 'Tests',
 
                     'error.title': 'Error Loading Data',
-                    'error.message': 'Failed to load data. Make sure to run: tia-mapper export -o dashboard/data'
+                    'error.message': 'Failed to load data. Make sure to run: tia-mapper export -o dashboard/data',
+
+                    'sidebar.expansionLevel': 'Expand:',
+                    'sidebar.collapseAll': 'Collapse all folders',
+                    'sidebar.showFolders': 'Show folders only',
+                    'sidebar.expandAll': 'Expand all files'
                 },
                 zh: {
                     subtitle: '代码覆盖率测试影响分析',
@@ -736,7 +766,12 @@
                     'heatmap.tests': '测试数',
 
                     'error.title': '加载数据失败',
-                    'error.message': '无法加载数据。请确保已运行：tia-mapper export -o dashboard/data'
+                    'error.message': '无法加载数据。请确保已运行：tia-mapper export -o dashboard/data',
+
+                    'sidebar.expansionLevel': '展开:',
+                    'sidebar.collapseAll': '全部折叠',
+                    'sidebar.showFolders': '仅显示文件夹',
+                    'sidebar.expandAll': '全部展开'
                 }
             };
 
@@ -768,6 +803,11 @@
                 // Update placeholders
                 document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
                     el.placeholder = t(el.dataset.i18nPlaceholder);
+                });
+
+                // Update titles (tooltips)
+                document.querySelectorAll('[data-i18n-title]').forEach(el => {
+                    el.title = t(el.dataset.i18nTitle);
                 });
 
                 // Re-render dynamic content (only if data is loaded)
@@ -1097,6 +1137,58 @@
                         chevron.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
                     }
                 }
+            }
+
+            // Current expansion level state
+            let currentExpansionLevel = 'files'; // 'none', 'folders', 'files'
+
+            function setExpansionLevel(level) {
+                currentExpansionLevel = level;
+                const container = document.getElementById('file-list-container');
+                if (!container) return;
+
+                const folderGroups = container.querySelectorAll('.folder-group');
+
+                folderGroups.forEach(group => {
+                    const folderContent = group.querySelector('.folder-content');
+                    const header = group.querySelector('.folder-header');
+                    const chevron = header?.querySelector('.folder-chevron');
+
+                    if (!folderContent) return;
+
+                    switch (level) {
+                        case 'none':
+                            // Collapse all - hide folder contents
+                            folderContent.style.display = 'none';
+                            if (chevron) chevron.style.transform = 'rotate(0deg)';
+                            break;
+                        case 'folders':
+                            // Show folders only - same as none, just show folder headers
+                            folderContent.style.display = 'none';
+                            if (chevron) chevron.style.transform = 'rotate(0deg)';
+                            break;
+                        case 'files':
+                            // Expand all - show all files
+                            folderContent.style.display = '';
+                            if (chevron) chevron.style.transform = 'rotate(90deg)';
+                            break;
+                    }
+                });
+
+                // Update button styles to show active state
+                updateExpansionButtonStyles(level);
+            }
+
+            function updateExpansionButtonStyles(activeLevel) {
+                const buttons = document.querySelectorAll('.expansion-btn');
+                buttons.forEach(btn => {
+                    const btnLevel = btn.getAttribute('data-level');
+                    if (btnLevel === activeLevel) {
+                        btn.className = 'expansion-btn px-2 py-1 text-[10px] rounded bg-indigo-500/30 text-indigo-300 hover:bg-indigo-500/50 transition';
+                    } else {
+                        btn.className = 'expansion-btn px-2 py-1 text-[10px] rounded bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300 transition';
+                    }
+                });
             }
 
             // ============ New UX Helper Functions ============
