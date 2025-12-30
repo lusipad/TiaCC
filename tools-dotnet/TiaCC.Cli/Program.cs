@@ -33,8 +33,8 @@ class Program
             getDefaultValue: () => ".");
         var patternOption = new Option<string[]>(
             aliases: ["--pattern", "-p"],
-            description: "File patterns to include (e.g., *.cpp *.h)",
-            getDefaultValue: () => ["*.cpp", "*.c", "*.h", "*.hpp"]);
+            description: "File patterns to include (e.g., *.cs *.cpp *.h)",
+            getDefaultValue: () => ["*.cs", "*.cpp", "*.c", "*.h", "*.hpp"]);
         scanCommand.AddOption(dbOption);
         scanCommand.AddOption(scanDirOption);
         scanCommand.AddOption(patternOption);
@@ -170,6 +170,32 @@ class Program
         configCommand.AddCommand(configInitCommand);
         configCommand.AddCommand(configShowCommand);
 
+        // split command
+        var splitCommand = new Command("split", "Split tests into groups for parallel execution");
+        var splitCountOption = new Option<int>(
+            aliases: ["--count", "-n"],
+            description: "Number of groups to split into",
+            getDefaultValue: () => 4);
+        var splitIndexOption = new Option<int?>(
+            aliases: ["--index", "-i"],
+            description: "Return only the Nth group (0-based)");
+        var splitModeOption = new Option<string>(
+            aliases: ["--mode", "-m"],
+            description: "Split mode: round-robin, balanced, or random",
+            getDefaultValue: () => "round-robin");
+        splitCommand.AddOption(dbOption);
+        splitCommand.AddOption(baseRefOption);
+        splitCommand.AddOption(headRefOption);
+        splitCommand.AddOption(uncommittedOption);
+        splitCommand.AddOption(splitCountOption);
+        splitCommand.AddOption(splitIndexOption);
+        splitCommand.AddOption(splitModeOption);
+        splitCommand.AddOption(formatOption);
+        splitCommand.SetHandler(async (string db, string? baseRef, string? headRef, bool uncommitted, int count, int? index, string mode, string format) =>
+        {
+            await ExecuteWithErrorHandling(() => SplitCommandAsync(db, baseRef, headRef, uncommitted, count, index, mode, format));
+        }, dbOption, baseRefOption, headRefOption, uncommittedOption, splitCountOption, splitIndexOption, splitModeOption, formatOption);
+
         rootCommand.AddCommand(initCommand);
         rootCommand.AddCommand(scanCommand);
         rootCommand.AddCommand(mapCommand);
@@ -179,6 +205,7 @@ class Program
         rootCommand.AddCommand(recommendCommand);
         rootCommand.AddCommand(runCommand);
         rootCommand.AddCommand(configCommand);
+        rootCommand.AddCommand(splitCommand);
 
         return await rootCommand.InvokeAsync(args);
     }
@@ -290,20 +317,42 @@ class Program
             return;
         }
 
+        var symbolExtractor = new SymbolExtractor();
+        var totalSymbols = 0;
+
         await AnsiConsole.Progress()
             .StartAsync(async ctx =>
             {
-                var task = ctx.AddTask("[green]Scanning files[/]", maxValue: files.Count);
+                var fileTask = ctx.AddTask("[green]Scanning files[/]", maxValue: files.Count);
+                var symbolTask = ctx.AddTask("[cyan]Extracting symbols[/]", maxValue: files.Count);
 
                 foreach (var file in files)
                 {
                     var relativePath = Path.GetRelativePath(directory, file).Replace('\\', '/');
-                    await db.GetOrCreateSourceFileAsync(relativePath);
-                    task.Increment(1);
+                    var sourceFile = await db.GetOrCreateSourceFileAsync(relativePath);
+                    fileTask.Increment(1);
+
+                    // Extract symbols for C# files
+                    var extension = Path.GetExtension(file).ToLowerInvariant();
+                    if (extension == ".cs")
+                    {
+                        var symbols = symbolExtractor.ExtractFromCSharp(file);
+                        foreach (var symbol in symbols)
+                        {
+                            await db.GetOrCreateSymbolAsync(
+                                sourceFile.Id,
+                                symbol.Name,
+                                symbol.SymbolType,
+                                symbol.StartLine,
+                                symbol.EndLine);
+                            totalSymbols++;
+                        }
+                    }
+                    symbolTask.Increment(1);
                 }
             });
 
-        AnsiConsole.MarkupLine($"[green]Scanned {files.Count} files.[/]");
+        AnsiConsole.MarkupLine($"[green]Scanned {files.Count} files, extracted {totalSymbols} symbols.[/]");
     }
 
     static async Task MapCommandAsync(string dbPath, string coveragePath, string testName, string baseDir)
@@ -837,5 +886,179 @@ class Program
         AnsiConsole.Write(tree);
 
         return Task.CompletedTask;
+    }
+
+    static async Task SplitCommandAsync(string dbPath, string? baseRef, string? headRef, bool includeUncommitted, int groupCount, int? groupIndex, string mode, string format)
+    {
+        if (!File.Exists(dbPath))
+        {
+            throw new FileNotFoundException("Database not found. Run 'init' and 'map' first.", dbPath);
+        }
+
+        if (groupCount < 1)
+        {
+            throw new ArgumentException("Group count must be at least 1.");
+        }
+
+        var gitService = new GitService();
+
+        if (!gitService.IsGitRepository())
+        {
+            throw new InvalidOperationException("Not a Git repository. The split command requires Git.");
+        }
+
+        // Collect changed files (same logic as recommend)
+        var changedFiles = new HashSet<string>();
+
+        if (includeUncommitted)
+        {
+            foreach (var file in gitService.GetUncommittedChanges())
+            {
+                changedFiles.Add(file);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(baseRef))
+        {
+            foreach (var file in gitService.GetChangedFiles(baseRef, headRef))
+            {
+                changedFiles.Add(file);
+            }
+        }
+        else if (!includeUncommitted)
+        {
+            foreach (var file in gitService.GetChangedFilesInLastCommits(1))
+            {
+                changedFiles.Add(file);
+            }
+        }
+
+        await using var db = new DatabaseService(dbPath);
+
+        var affectedTests = new HashSet<string>();
+        foreach (var file in changedFiles)
+        {
+            var tests = await db.GetTestsForSourceFileAsync(file);
+            foreach (var test in tests)
+            {
+                affectedTests.Add(test.ScriptPath);
+            }
+        }
+
+        if (affectedTests.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No affected tests found.[/]");
+            return;
+        }
+
+        // Sort tests for consistent splitting
+        var sortedTests = affectedTests.OrderBy(t => t).ToList();
+
+        // Split tests into groups
+        var groups = SplitTests(sortedTests, groupCount, mode);
+
+        // Output based on format and index
+        if (groupIndex.HasValue)
+        {
+            if (groupIndex.Value < 0 || groupIndex.Value >= groupCount)
+            {
+                throw new ArgumentException($"Group index must be between 0 and {groupCount - 1}.");
+            }
+
+            var selectedGroup = groups[groupIndex.Value];
+            OutputTestList(selectedGroup, format);
+        }
+        else
+        {
+            // Output all groups
+            switch (format.ToLowerInvariant())
+            {
+                case "json":
+                    var json = System.Text.Json.JsonSerializer.Serialize(
+                        groups.Select((g, i) => new { group = i, tests = g }).ToList(),
+                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                    Console.WriteLine(json);
+                    break;
+
+                default:
+                    AnsiConsole.MarkupLine($"[green]Split {affectedTests.Count} tests into {groupCount} groups:[/]");
+                    AnsiConsole.WriteLine();
+
+                    for (var i = 0; i < groups.Count; i++)
+                    {
+                        AnsiConsole.MarkupLine($"[cyan]Group {i}[/] ({groups[i].Count} tests):");
+                        foreach (var test in groups[i])
+                        {
+                            AnsiConsole.MarkupLine($"  [dim]{test}[/]");
+                        }
+                        AnsiConsole.WriteLine();
+                    }
+                    break;
+            }
+        }
+    }
+
+    static List<List<string>> SplitTests(List<string> tests, int groupCount, string mode)
+    {
+        var groups = Enumerable.Range(0, groupCount).Select(_ => new List<string>()).ToList();
+
+        switch (mode.ToLowerInvariant())
+        {
+            case "random":
+                var random = new Random();
+                var shuffled = tests.OrderBy(_ => random.Next()).ToList();
+                for (var i = 0; i < shuffled.Count; i++)
+                {
+                    groups[i % groupCount].Add(shuffled[i]);
+                }
+                break;
+
+            case "balanced":
+                // Try to balance by test name length (proxy for complexity)
+                var byLength = tests.OrderByDescending(t => t.Length).ToList();
+                var groupSizes = new int[groupCount];
+                foreach (var test in byLength)
+                {
+                    var minGroup = Array.IndexOf(groupSizes, groupSizes.Min());
+                    groups[minGroup].Add(test);
+                    groupSizes[minGroup] += test.Length;
+                }
+                break;
+
+            default: // round-robin
+                for (var i = 0; i < tests.Count; i++)
+                {
+                    groups[i % groupCount].Add(tests[i]);
+                }
+                break;
+        }
+
+        return groups;
+    }
+
+    static void OutputTestList(List<string> tests, string format)
+    {
+        switch (format.ToLowerInvariant())
+        {
+            case "json":
+                var json = System.Text.Json.JsonSerializer.Serialize(tests,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                Console.WriteLine(json);
+                break;
+
+            case "ci":
+                foreach (var test in tests)
+                {
+                    Console.WriteLine(test);
+                }
+                break;
+
+            default:
+                foreach (var test in tests)
+                {
+                    AnsiConsole.MarkupLine($"[cyan]{test}[/]");
+                }
+                break;
+        }
     }
 }

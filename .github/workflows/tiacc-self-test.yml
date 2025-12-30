@@ -291,7 +291,7 @@ jobs:
           mkdir -p tiacc-data/coverage
 
           echo "🔍 Running tests with coverage..."
-          TEST_CLASSES=("CoverageParserTests" "DatabaseServiceTests")
+          TEST_CLASSES=("CoverageParserTests" "DatabaseServiceTests" "GitServiceTests" "SymbolExtractorTests")
 
           for TEST_CLASS in "${TEST_CLASSES[@]}"; do
             echo ""
