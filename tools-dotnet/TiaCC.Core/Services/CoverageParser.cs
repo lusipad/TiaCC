@@ -862,7 +862,7 @@ public static class CoverageParser
 
     private static string RunCommand(string command, string arguments)
     {
-        var process = new Process
+        using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
@@ -876,12 +876,48 @@ public static class CoverageParser
         };
 
         process.Start();
+
+        // Read stdout and stderr to avoid deadlock
         var output = process.StandardOutput.ReadToEnd();
         var error = process.StandardError.ReadToEnd();
+
         process.WaitForExit();
 
         if (process.ExitCode != 0)
-            throw new Exception($"{command} failed: {error}");
+            throw new InvalidOperationException($"{command} failed with exit code {process.ExitCode}: {error}");
+
+        return output;
+    }
+
+    private static async Task<string> RunCommandAsync(string command, string arguments, CancellationToken cancellationToken = default)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = command,
+                Arguments = arguments,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        process.Start();
+
+        // Read stdout and stderr asynchronously to avoid deadlock
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        await Task.WhenAll(outputTask, errorTask);
+        await process.WaitForExitAsync(cancellationToken);
+
+        var output = await outputTask;
+        var error = await errorTask;
+
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"{command} failed with exit code {process.ExitCode}: {error}");
 
         return output;
     }

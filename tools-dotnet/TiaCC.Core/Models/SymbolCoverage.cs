@@ -10,6 +10,7 @@ public class SymbolCoverage
     public int TestScriptId { get; set; }
     public double CoveragePct { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
 
     // Navigation properties
     public Symbol Symbol { get; set; } = null!;

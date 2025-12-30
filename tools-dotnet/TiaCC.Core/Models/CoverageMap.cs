@@ -10,6 +10,7 @@ public class CoverageMap
     public int TestScriptId { get; set; }
     public double LineCoveragePct { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
 
     // Navigation properties
     public SourceFile SourceFile { get; set; } = null!;

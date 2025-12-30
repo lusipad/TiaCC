@@ -21,7 +21,7 @@ class Program
         initCommand.AddOption(dbOption);
         initCommand.SetHandler(async (string db) =>
         {
-            await InitCommandAsync(db);
+            await ExecuteWithErrorHandling(() => InitCommandAsync(db));
         }, dbOption);
 
         // scan command
@@ -39,7 +39,7 @@ class Program
         scanCommand.AddOption(patternOption);
         scanCommand.SetHandler(async (string db, string dir, string[] patterns) =>
         {
-            await ScanCommandAsync(db, dir, patterns);
+            await ExecuteWithErrorHandling(() => ScanCommandAsync(db, dir, patterns));
         }, dbOption, scanDirOption, patternOption);
 
         // map command
@@ -60,7 +60,7 @@ class Program
         mapCommand.AddOption(baseDirOption);
         mapCommand.SetHandler(async (string db, string coverage, string test, string baseDir) =>
         {
-            await MapCommandAsync(db, coverage, test, baseDir);
+            await ExecuteWithErrorHandling(() => MapCommandAsync(db, coverage, test, baseDir));
         }, dbOption, coverageOption, testNameOption, baseDirOption);
 
         // export command
@@ -73,7 +73,7 @@ class Program
         exportCommand.AddOption(outputOption);
         exportCommand.SetHandler(async (string db, string output) =>
         {
-            await ExportCommandAsync(db, output);
+            await ExecuteWithErrorHandling(() => ExportCommandAsync(db, output));
         }, dbOption, outputOption);
 
         // query command
@@ -85,7 +85,7 @@ class Program
         queryCommand.AddOption(filesOption);
         queryCommand.SetHandler(async (string db, string[] files) =>
         {
-            await QueryCommandAsync(db, files);
+            await ExecuteWithErrorHandling(() => QueryCommandAsync(db, files));
         }, dbOption, filesOption);
 
         // stats command
@@ -93,7 +93,7 @@ class Program
         statsCommand.AddOption(dbOption);
         statsCommand.SetHandler(async (string db) =>
         {
-            await StatsCommandAsync(db);
+            await ExecuteWithErrorHandling(() => StatsCommandAsync(db));
         }, dbOption);
 
         rootCommand.AddCommand(initCommand);
@@ -104,6 +104,50 @@ class Program
         rootCommand.AddCommand(statsCommand);
 
         return await rootCommand.InvokeAsync(args);
+    }
+
+    /// <summary>
+    /// Wraps command execution with proper error handling
+    /// </summary>
+    static async Task ExecuteWithErrorHandling(Func<Task> command)
+    {
+        try
+        {
+            await command();
+        }
+        catch (FileNotFoundException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]File not found:[/] {ex.FileName ?? ex.Message}");
+            Environment.ExitCode = 1;
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Directory not found:[/] {ex.Message}");
+            Environment.ExitCode = 1;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Access denied:[/] {ex.Message}");
+            Environment.ExitCode = 1;
+        }
+        catch (NotSupportedException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Unsupported format:[/] {ex.Message}");
+            Environment.ExitCode = 1;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Operation failed:[/] {ex.Message}");
+            Environment.ExitCode = 1;
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Unexpected error:[/] {ex.Message}");
+#if DEBUG
+            AnsiConsole.WriteException(ex);
+#endif
+            Environment.ExitCode = 1;
+        }
     }
 
     static async Task InitCommandAsync(string dbPath)
@@ -120,7 +164,14 @@ class Program
             File.Delete(dbPath);
         }
 
-        using var db = new DatabaseService(dbPath);
+        // Ensure parent directory exists
+        var parentDir = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
+        {
+            Directory.CreateDirectory(parentDir);
+        }
+
+        await using var db = new DatabaseService(dbPath);
         await db.InitializeAsync();
 
         AnsiConsole.MarkupLine("[green]Database initialized successfully.[/]");
@@ -130,11 +181,15 @@ class Program
     {
         if (!File.Exists(dbPath))
         {
-            AnsiConsole.MarkupLine("[red]Database not found. Run 'init' first.[/]");
-            return;
+            throw new FileNotFoundException("Database not found. Run 'init' first.", dbPath);
         }
 
-        using var db = new DatabaseService(dbPath);
+        if (!Directory.Exists(directory))
+        {
+            throw new DirectoryNotFoundException($"Directory not found: {directory}");
+        }
+
+        await using var db = new DatabaseService(dbPath);
 
         AnsiConsole.MarkupLine($"[cyan]Scanning directory:[/] {directory}");
         AnsiConsole.MarkupLine($"[cyan]Patterns:[/] {string.Join(", ", patterns)}");
@@ -142,7 +197,20 @@ class Program
         var files = new List<string>();
         foreach (var pattern in patterns)
         {
-            files.AddRange(Directory.GetFiles(directory, pattern, SearchOption.AllDirectories));
+            try
+            {
+                files.AddRange(Directory.GetFiles(directory, pattern, SearchOption.AllDirectories));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Warning: Cannot access some directories for pattern {pattern}[/]");
+            }
+        }
+
+        if (files.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No files found matching the patterns.[/]");
+            return;
         }
 
         await AnsiConsole.Progress()
@@ -165,22 +233,27 @@ class Program
     {
         if (!File.Exists(dbPath))
         {
-            AnsiConsole.MarkupLine("[red]Database not found. Run 'init' first.[/]");
-            return;
+            throw new FileNotFoundException("Database not found. Run 'init' first.", dbPath);
         }
 
         if (!File.Exists(coveragePath))
         {
-            AnsiConsole.MarkupLine($"[red]Coverage file not found: {coveragePath}[/]");
-            return;
+            throw new FileNotFoundException("Coverage file not found.", coveragePath);
         }
 
-        using var db = new DatabaseService(dbPath);
+        await using var db = new DatabaseService(dbPath);
 
         AnsiConsole.MarkupLine($"[cyan]Parsing coverage:[/] {coveragePath}");
         AnsiConsole.MarkupLine($"[cyan]Test name:[/] {testName}");
 
-        var coverage = CoverageParser.Parse(coveragePath);
+        var coverage = CoverageParser.Parse(coveragePath, baseDir);
+
+        if (coverage.Files.Count == 0 && coverage.Functions.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No coverage data found in the file.[/]");
+            return;
+        }
+
         var testScript = await db.GetOrCreateTestScriptAsync(testName);
 
         await AnsiConsole.Progress()
@@ -190,24 +263,28 @@ class Program
 
                 foreach (var (filePath, fileCov) in coverage.Files)
                 {
-                    var relativePath = Path.GetRelativePath(baseDir, filePath).Replace('\\', '/');
-                    var sourceFile = await db.GetOrCreateSourceFileAsync(relativePath);
+                    var sourceFile = await db.GetOrCreateSourceFileAsync(filePath);
                     await db.UpsertCoverageMapAsync(sourceFile.Id, testScript.Id, fileCov.CoveragePercent);
                     task.Increment(1);
                 }
 
                 // Map functions
-                var funcTask = ctx.AddTask("[green]Mapping functions[/]", maxValue: coverage.Functions.Count);
-                foreach (var func in coverage.Functions)
+                if (coverage.Functions.Count > 0)
                 {
-                    var relativePath = Path.GetRelativePath(baseDir, func.FilePath).Replace('\\', '/');
-                    var sourceFile = await db.GetOrCreateSourceFileAsync(relativePath);
-                    var symbol = await db.GetOrCreateSymbolAsync(
-                        sourceFile.Id, func.Name, "function", func.StartLine, func.EndLine);
+                    var funcTask = ctx.AddTask("[green]Mapping functions[/]", maxValue: coverage.Functions.Count);
+                    foreach (var func in coverage.Functions)
+                    {
+                        var sourceFile = await db.GetOrCreateSourceFileAsync(func.FilePath);
+                        var symbol = await db.GetOrCreateSymbolAsync(
+                            sourceFile.Id, func.Name, "function", func.StartLine, func.EndLine);
 
-                    var funcCoverage = func.IsCovered ? 100.0 : 0.0;
-                    await db.UpsertSymbolCoverageAsync(symbol.Id, testScript.Id, funcCoverage);
-                    funcTask.Increment(1);
+                        // Use execution count for more accurate coverage
+                        var funcCoverage = func.ExecutionCount > 0
+                            ? Math.Min(100.0, func.ExecutionCount)
+                            : 0.0;
+                        await db.UpsertSymbolCoverageAsync(symbol.Id, testScript.Id, funcCoverage);
+                        funcTask.Increment(1);
+                    }
                 }
             });
 
@@ -218,11 +295,16 @@ class Program
     {
         if (!File.Exists(dbPath))
         {
-            AnsiConsole.MarkupLine("[red]Database not found.[/]");
-            return;
+            throw new FileNotFoundException("Database not found.", dbPath);
         }
 
-        using var db = new DatabaseService(dbPath);
+        // Ensure output directory exists
+        if (!Directory.Exists(outputDir))
+        {
+            Directory.CreateDirectory(outputDir);
+        }
+
+        await using var db = new DatabaseService(dbPath);
         var exportService = new ExportService(db);
 
         AnsiConsole.MarkupLine($"[cyan]Exporting to:[/] {outputDir}");
@@ -241,18 +323,24 @@ class Program
     {
         if (!File.Exists(dbPath))
         {
-            AnsiConsole.MarkupLine("[red]Database not found.[/]");
+            throw new FileNotFoundException("Database not found.", dbPath);
+        }
+
+        if (files.Length == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No files specified.[/]");
             return;
         }
 
-        using var db = new DatabaseService(dbPath);
+        await using var db = new DatabaseService(dbPath);
 
         var allTests = new HashSet<string>();
 
         foreach (var file in files)
         {
-            var tests = await db.GetTestsForSourceFileAsync(file);
-            foreach (var test in tests)
+            var normalizedPath = file.Replace('\\', '/');
+            var tests = await db.GetTestsForSourceFileAsync(normalizedPath);
+            foreach (var test in tests ?? [])
             {
                 allTests.Add(test.ScriptPath);
             }
@@ -260,7 +348,7 @@ class Program
 
         if (allTests.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]No affected tests found.[/]");
+            Console.WriteLine("No affected tests found.");
             return;
         }
 
@@ -272,7 +360,6 @@ class Program
 
         // Also output as plain text for CI/CD integration
         Console.WriteLine();
-        Console.WriteLine("--- AFFECTED_TESTS ---");
         foreach (var test in allTests.OrderBy(t => t))
         {
             Console.WriteLine(test);
@@ -283,11 +370,10 @@ class Program
     {
         if (!File.Exists(dbPath))
         {
-            AnsiConsole.MarkupLine("[red]Database not found.[/]");
-            return;
+            throw new FileNotFoundException("Database not found.", dbPath);
         }
 
-        using var db = new DatabaseService(dbPath);
+        await using var db = new DatabaseService(dbPath);
         var stats = await db.GetStatsAsync();
 
         var table = new Table();
