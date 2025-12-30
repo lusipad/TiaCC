@@ -5,10 +5,12 @@ on:
     branches: [ main, develop, "claude/*" ]
     paths:
       - 'tools-node/**'
+      - 'tools-dotnet/**'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'tools-node/**'
+      - 'tools-dotnet/**'
 
 jobs:
   # Job 1: 每周全量测试，构建基准映射数据库
@@ -257,4 +259,214 @@ jobs:
         with:
           name: tiacc-dogfooding-demo
           path: tools-node/tiacc-data/
+          retention-days: 7
+
+  # Job 4: .NET 全量测试，构建映射数据库
+  dotnet-build-map:
+    name: 📊 Build .NET Test Impact Map
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: 📚 Restore dependencies
+        working-directory: tools-dotnet
+        run: dotnet restore
+
+      - name: 🔨 Build solution
+        working-directory: tools-dotnet
+        run: dotnet build -c Release --no-restore
+
+      - name: 🧪 Generate coverage for each test class
+        working-directory: tools-dotnet
+        run: |
+          mkdir -p tiacc-data/coverage
+
+          echo "🔍 Running tests with coverage..."
+          TEST_CLASSES=("CoverageParserTests" "DatabaseServiceTests")
+
+          for TEST_CLASS in "${TEST_CLASSES[@]}"; do
+            echo ""
+            echo "Running $TEST_CLASS..."
+            rm -rf "tiacc-data/coverage/$TEST_CLASS"
+            mkdir -p "tiacc-data/coverage/$TEST_CLASS"
+
+            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj \
+              --no-build -c Release \
+              --filter "FullyQualifiedName~$TEST_CLASS" \
+              --collect:"XPlat Code Coverage" \
+              --results-directory "tiacc-data/coverage/$TEST_CLASS" \
+              -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura || true
+
+            # Copy coverage file with test name
+            COVERAGE_FILE=$(find "tiacc-data/coverage/$TEST_CLASS" -name "coverage.cobertura.xml" -type f | head -1)
+            if [ -n "$COVERAGE_FILE" ]; then
+              cp "$COVERAGE_FILE" "tiacc-data/coverage/test_${TEST_CLASS}.cobertura.xml"
+              echo "✅ Coverage saved for $TEST_CLASS"
+            fi
+          done
+
+          echo ""
+          echo "📊 Generated coverage files:"
+          ls -1 tiacc-data/coverage/*.xml 2>/dev/null || echo "No coverage files found"
+
+      - name: 🗺️ Build test impact mapping database
+        working-directory: tools-dotnet
+        run: |
+          # Initialize database
+          dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- init --db tiacc-data/impact_map.db
+
+          # Map each coverage file
+          for COVERAGE_FILE in tiacc-data/coverage/test_*.cobertura.xml; do
+            if [ -f "$COVERAGE_FILE" ]; then
+              TEST_NAME=$(basename "$COVERAGE_FILE" .cobertura.xml | sed 's/^test_//')
+              echo "Mapping coverage for $TEST_NAME..."
+              dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- map \
+                --db tiacc-data/impact_map.db \
+                --coverage "$COVERAGE_FILE" \
+                --test "$TEST_NAME" \
+                --base-dir . || true
+            fi
+          done
+
+          # Show statistics
+          dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- stats --db tiacc-data/impact_map.db
+
+      - name: 💾 Upload .NET impact map as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiacc-dotnet-impact-map
+          path: tools-dotnet/tiacc-data/impact_map.db
+          retention-days: 30
+
+  # Job 5: .NET PR 智能测试选择
+  dotnet-smart-test:
+    name: 🎯 .NET Smart Test Selection (PR)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: 📥 Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: 📚 Restore and build
+        working-directory: tools-dotnet
+        run: |
+          dotnet restore
+          dotnet build -c Release --no-restore
+
+      - name: 🔍 Detect changed files
+        id: changed-files
+        working-directory: tools-dotnet
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
+          echo "📝 Changed files in this PR:"
+          cat changed_files.txt
+
+          # Filter for .cs files in tools-dotnet
+          grep '^tools-dotnet/.*\.cs$' changed_files.txt > changed_cs_files.txt || true
+
+          if [ -s changed_cs_files.txt ]; then
+            echo "✅ Found changed .NET source files:"
+            cat changed_cs_files.txt
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️  No .NET source files changed"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 💡 Download previous .NET impact map
+        if: steps.changed-files.outputs.has_changes == 'true'
+        uses: dawidd6/action-download-artifact@v3
+        continue-on-error: true
+        with:
+          workflow: tiacc-self-test.yml
+          name: tiacc-dotnet-impact-map
+          path: tools-dotnet/tiacc-data
+          search_artifacts: true
+
+      - name: 🎯 Get affected tests
+        id: affected-tests
+        if: steps.changed-files.outputs.has_changes == 'true'
+        working-directory: tools-dotnet
+        run: |
+          if [ -f "tiacc-data/impact_map.db" ]; then
+            echo "✅ Found .NET impact map, querying affected tests..."
+
+            # Get relative paths of changed files
+            CHANGED_FILES=$(cat changed_cs_files.txt | sed 's|^tools-dotnet/||' | tr '\n' ' ')
+
+            AFFECTED=$(dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- query \
+              --db tiacc-data/impact_map.db \
+              --files $CHANGED_FILES 2>/dev/null || echo "")
+
+            if [ -n "$AFFECTED" ] && [ "$AFFECTED" != "No affected tests found." ]; then
+              echo "🎯 Affected tests:"
+              echo "$AFFECTED"
+              echo "test_filter=$AFFECTED" >> $GITHUB_OUTPUT
+              echo "run_mode=smart" >> $GITHUB_OUTPUT
+            else
+              echo "ℹ️  No affected tests found, running all tests"
+              echo "run_mode=all" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️  .NET impact map not found, running all tests"
+            echo "run_mode=all" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🧪 Run .NET tests
+        working-directory: tools-dotnet
+        run: |
+          if [ "${{ steps.affected-tests.outputs.run_mode }}" == "smart" ]; then
+            echo "🎯 Running ONLY affected .NET tests..."
+            FILTER="${{ steps.affected-tests.outputs.test_filter }}"
+            # Convert space-separated list to filter expression
+            FILTER_EXPR=$(echo "$FILTER" | tr ' ' '\n' | sed 's/.*/FullyQualifiedName~&/' | tr '\n' '|' | sed 's/|$//')
+            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --filter "$FILTER_EXPR"
+          else
+            echo "🧪 Running ALL .NET tests..."
+            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj
+          fi
+
+  # Job 6: 验证 .NET dogfooding 脚本
+  dotnet-verify-demo:
+    name: 🐕 Verify .NET Dogfooding Script
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: 🐕 Run .NET dogfooding script
+        working-directory: tools-dotnet
+        run: bash scripts/build-self-test-map.sh
+
+      - name: 📤 Upload .NET demo artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiacc-dotnet-dogfooding-demo
+          path: tools-dotnet/tiacc-data/
           retention-days: 7

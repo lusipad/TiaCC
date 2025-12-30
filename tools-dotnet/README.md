@@ -76,14 +76,50 @@ tools-dotnet/
 │   ├── Data/              # EF Core DbContext
 │   ├── Models/            # Entity models
 │   └── Services/          # Business logic
+├── TiaCC.Core.Tests/      # Unit tests
+│   ├── CoverageParserTests.cs
+│   └── DatabaseServiceTests.cs
 ├── TiaCC.Cli/             # CLI application
 │   └── Program.cs         # Command definitions
-└── TiaCC.Dashboard/       # Blazor WebAssembly dashboard
-    ├── Pages/             # Razor pages
-    ├── Components/        # Reusable components
-    ├── Services/          # Data services
-    └── wwwroot/           # Static assets
+├── TiaCC.Dashboard/       # Blazor WebAssembly dashboard
+│   ├── Pages/             # Razor pages
+│   ├── Components/        # Reusable components
+│   ├── Services/          # Data services
+│   └── wwwroot/           # Static assets
+└── scripts/               # Automation scripts
+    ├── build-self-test-map.sh   # Dogfooding script
+    └── run-affected-tests.sh    # Smart test selection
 ```
+
+## Testing
+
+Run all tests:
+
+```bash
+dotnet test
+```
+
+Run with coverage:
+
+```bash
+dotnet test --collect:"XPlat Code Coverage"
+```
+
+## Dogfooding
+
+TiaCC uses itself to optimize its own CI pipeline:
+
+```bash
+# Build test impact map from own test suite
+./scripts/build-self-test-map.sh
+
+# Run only tests affected by recent changes
+./scripts/run-affected-tests.sh
+```
+
+This generates:
+- `tiacc-data/impact_map.db` - Test impact database
+- `tiacc-data/coverage/` - Per-test coverage files
 
 ## Dashboard
 
