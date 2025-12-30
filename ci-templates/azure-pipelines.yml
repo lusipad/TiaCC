@@ -13,7 +13,6 @@
 #     - template: ci-templates/azure-pipelines.yml@tiacc
 #       parameters:
 #         coverageDir: './coverage'
-#         format: 'auto'
 
 parameters:
   - name: coverageDir
@@ -22,27 +21,15 @@ parameters:
   - name: database
     type: string
     default: 'impact_map.db'
-  - name: format
-    type: string
-    default: 'auto'
-    values:
-      - auto
-      - cobertura
-      - lcov
-      - jacoco
-      - istanbul
-      - coveragepy
-      - dotcover
-      - opencppcoverage
   - name: baseBranch
     type: string
     default: 'origin/main'
   - name: verbose
     type: boolean
     default: false
-  - name: nodeVersion
+  - name: dotnetVersion
     type: string
-    default: '20.x'
+    default: '8.0.x'
 
 stages:
   - stage: TiaCC
@@ -59,10 +46,10 @@ stages:
         pool:
           vmImage: 'ubuntu-latest'
         steps:
-          - task: NodeTool@0
-            displayName: 'Install Node.js'
+          - task: UseDotNet@2
+            displayName: 'Install .NET SDK'
             inputs:
-              versionSpec: '${{ parameters.nodeVersion }}'
+              version: '${{ parameters.dotnetVersion }}'
 
           - task: Cache@2
             displayName: 'Cache TiaCC Database'
@@ -72,24 +59,26 @@ stages:
               restoreKeys: |
                 tiacc | $(Agent.OS)
 
-          - script: npm install -g @tiacc/tools
-            displayName: 'Install TiaCC'
+          - script: dotnet build tools-dotnet -c Release
+            displayName: 'Build TiaCC'
 
           - script: |
-              ARGS="build -c ${{ parameters.coverageDir }} -d ${{ parameters.database }}"
+              dotnet run --project tools-dotnet/TiaCC.Cli -- init --db ${{ parameters.database }}
 
-              case "${{ parameters.format }}" in
-                lcov) ARGS="$ARGS --lcov" ;;
-                jacoco) ARGS="$ARGS --jacoco" ;;
-                istanbul) ARGS="$ARGS --istanbul" ;;
-                coveragepy) ARGS="$ARGS --coveragepy" ;;
-                dotcover) ARGS="$ARGS --dotcover" ;;
-                opencppcoverage) ARGS="$ARGS --opencppcoverage" ;;
-              esac
+              # Map coverage files
+              for coverage_file in ${{ parameters.coverageDir }}/**/coverage.cobertura.xml; do
+                if [ -f "$coverage_file" ]; then
+                  TEST_NAME=$(basename $(dirname "$coverage_file"))
+                  echo "Mapping coverage for $TEST_NAME..."
+                  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+                    --db ${{ parameters.database }} \
+                    --coverage "$coverage_file" \
+                    --test "$TEST_NAME" || true
+                fi
+              done
 
-              if [ "${{ parameters.verbose }}" = "true" ]; then ARGS="$ARGS -v"; fi
-
-              tia-mapper $ARGS
+              # Show statistics
+              dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db ${{ parameters.database }}
             displayName: 'Build TiaCC Mapping'
 
           - publish: '${{ parameters.database }}'
@@ -103,10 +92,10 @@ stages:
         pool:
           vmImage: 'ubuntu-latest'
         steps:
-          - task: NodeTool@0
-            displayName: 'Install Node.js'
+          - task: UseDotNet@2
+            displayName: 'Install .NET SDK'
             inputs:
-              versionSpec: '${{ parameters.nodeVersion }}'
+              version: '${{ parameters.dotnetVersion }}'
 
           - task: DownloadPipelineArtifact@2
             displayName: 'Download TiaCC Database'
@@ -125,8 +114,8 @@ stages:
               fi
             displayName: 'Restore Database'
 
-          - script: npm install -g @tiacc/tools
-            displayName: 'Install TiaCC'
+          - script: dotnet build tools-dotnet -c Release
+            displayName: 'Build TiaCC'
 
           - script: |
               if [ ! -f "${{ parameters.database }}" ]; then
@@ -135,12 +124,13 @@ stages:
                 exit 0
               fi
 
-              ARGS="--db ${{ parameters.database }}"
-              ARGS="$ARGS --base origin/$(System.PullRequest.TargetBranch)"
+              # Get changed files
+              CHANGED_FILES=$(git diff --name-only origin/$(System.PullRequest.TargetBranch))
 
-              if [ "${{ parameters.verbose }}" = "true" ]; then ARGS="$ARGS -v"; fi
-
-              tia-recommend $ARGS > affected-tests.txt || true
+              # Query affected tests
+              dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+                --db ${{ parameters.database }} \
+                --files $CHANGED_FILES > affected-tests.txt || true
 
               echo "=== TiaCC Test Impact Analysis ==="
               echo "Affected tests:"

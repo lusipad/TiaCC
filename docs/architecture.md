@@ -55,13 +55,13 @@ TiaCC (Test Impact Analysis for Code Coverage) 是一个跨平台测试影响分
 │  │                        分析阶段                                  │       │
 │  │                                                                 │       │
 │  │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐         │       │
-│  │  │ llvm-cov    │    │ tia-mapper  │    │ SQLite DB   │         │       │
+│  │  │ llvm-cov    │    │ TiaCC.Cli   │    │ SQLite DB   │         │       │
 │  │  │ (LLVM工具)  │───▶│ (映射生成)  │───▶│ (映射存储)  │         │       │
 │  │  └─────────────┘    └─────────────┘    └──────┬──────┘         │       │
 │  │                                               │                 │       │
 │  │                                               ▼                 │       │
 │  │                                        ┌─────────────┐         │       │
-│  │                                        │tia-recommend│         │       │
+│  │                                        │ TiaCC.Cli   │         │       │
 │  │                                        │ (测试推荐)  │         │       │
 │  │                                        └──────┬──────┘         │       │
 │  └───────────────────────────────────────────────┼──────────────────┘       │
@@ -119,7 +119,6 @@ clients/
 ├── tia_hooks.lua    # Lua 客户端 (主要)
 ├── tia_hooks.py     # Python 客户端
 ├── TiaHooks.cs      # C# 客户端
-├── tia_hooks.ts     # TypeScript 客户端
 └── tia_hooks.go     # Go 客户端
 ```
 
@@ -128,19 +127,21 @@ clients/
 2. 在测试前后发送信号
 3. 管理录制模式 (精确/批量)
 
-### 2.3 CLI 工具 (tools-node)
+### 2.3 CLI 工具 (tools-dotnet)
 
 ```
-tools-node/
-└── src/
-    ├── cli/
-    │   ├── mapper.ts       # 映射生成器
-    │   └── recommend.ts    # 测试推荐器
-    ├── coverage-parser.ts  # 覆盖率解析器
-    ├── database.ts         # SQLite 数据库操作
-    ├── git-utils.ts        # Git 集成
-    ├── symbol-extractor.ts # 符号提取器
-    └── test-runner.ts      # 测试运行器
+tools-dotnet/
+├── TiaCC.Core/              # 核心库
+│   ├── Services/
+│   │   ├── CoverageParser.cs    # 覆盖率解析器
+│   │   ├── DatabaseService.cs   # SQLite 数据库操作
+│   │   ├── GitService.cs        # Git 集成
+│   │   ├── SymbolExtractor.cs   # 符号提取器
+│   │   └── ExportService.cs     # 导出服务
+│   └── Models/                  # 数据模型
+├── TiaCC.Cli/               # CLI 工具
+│   └── Program.cs           # 主入口 (init, map, query, stats)
+└── TiaCC.Dashboard/         # Dashboard 服务
 ```
 
 ---
@@ -203,9 +204,11 @@ tools-node/
 │                             ▼                                     │
 │  3. 解析并存储映射                                                 │
 │     ┌─────────────────────────────────────────────┐               │
-│     │  tia-mapper build                            │               │
-│     │    --coverage-dir ./coverage_data            │               │
+│     │  dotnet run --project TiaCC.Cli -- init      │               │
 │     │    --db impact_map.db                        │               │
+│     │  dotnet run --project TiaCC.Cli -- map       │               │
+│     │    --coverage ./coverage_data/*.xml          │               │
+│     │    --db impact_map.db --test AllTests        │               │
 │     └─────────────────────────────────────────────┘               │
 │                             │                                     │
 │                             ▼                                     │
@@ -549,57 +552,49 @@ TiaCC 支持多种主流覆盖率格式，满足不同语言和工具链的需�
 
 ## 7. CLI 命令参考
 
-### 7.1 tia-mapper
+### 7.1 TiaCC CLI (.NET)
 
 ```bash
-# 构建映射数据库
-tia-mapper build \
-  --coverage-dir ./coverage_data \
+# 初始化数据库
+dotnet run --project TiaCC.Cli -- init --db impact_map.db
+
+# 映射覆盖率数据
+dotnet run --project TiaCC.Cli -- map \
   --db impact_map.db \
-  [--executable <path>] \
-  [--commit <hash>] \
-  [--verbose]
+  --coverage ./coverage/*.cobertura.xml \
+  --test TestClassName \
+  [--base-dir .]
 
 # 查看数据库统计
-tia-mapper stats --db impact_map.db
+dotnet run --project TiaCC.Cli -- stats --db impact_map.db
 
 # 查询文件的测试
-tia-mapper query <source-file> --db impact_map.db
+dotnet run --project TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files src/Calculator.cs
 
 # 导出数据到 JSON (用于 Dashboard)
-tia-mapper export --db impact_map.db --output ./dashboard/data
+dotnet run --project TiaCC.Cli -- export \
+  --db impact_map.db \
+  --output ./dashboard/data
 ```
 
-### 7.2 tia-recommend
+### 7.2 常用工作流
 
 ```bash
-# 基础推荐：受影响的测试
-tia-recommend \
+# Nightly: 收集覆盖率并构建映射
+dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage
+dotnet run --project TiaCC.Cli -- init --db impact_map.db
+dotnet run --project TiaCC.Cli -- map \
   --db impact_map.db \
-  [--base HEAD~1] \
-  [--branch origin/main] \
-  [--level file|function] \
-  [--output tests.txt] \
-  [--json] \
-  [--quiet]
+  --coverage ./coverage/*/coverage.cobertura.xml \
+  --test MyTests
 
-# 智能推荐：带优先级和失败预测 (Phase 4)
-tia-recommend \
+# PR: 查询受影响的测试
+CHANGED_FILES=$(git diff --name-only origin/main)
+dotnet run --project TiaCC.Cli -- query \
   --db impact_map.db \
-  --smart \
-  [--show-probability]  # 显示失败概率
-  [--show-duration]     # 显示预计耗时
-  [--top 10]            # 只显示优先级最高的 10 个测试
-  [--min-probability 0.3]  # 只显示失败概率 >= 30% 的测试
-
-# 分析最易失败的测试（基于历史数据）
-tia-recommend --db impact_map.db --flaky
-
-# 精确测试方法推荐
-tia-recommend \
-  --db impact_map.db \
-  --methods            # 输出 ClassName::methodName
-  [--group-by-class]   # 按类分组显示
+  --files $CHANGED_FILES
 ```
 
 ---
@@ -753,16 +748,17 @@ Dashboard 从 `dashboard/data/` 目录加载 JSON 数据：
 
 ### 9.1 添加新的覆盖率格式
 
-```typescript
-// 继承 CoverageParser 基类
-export class NewFormatParser extends CoverageParser {
-  getFileExtension(): string {
-    return '.new-format';
-  }
-
-  async parse(coverageFile: string): Promise<CoverageData | null> {
-    // 实现解析逻辑
-  }
+```csharp
+// 在 TiaCC.Core/Services/CoverageParser.cs 中添加新的解析方法
+public class NewFormatParser
+{
+    public CoverageData Parse(string coverageFile)
+    {
+        // 实现解析逻辑
+        var data = new CoverageData();
+        // ...
+        return data;
+    }
 }
 ```
 
@@ -822,52 +818,45 @@ priority_score = w1 * coverage_score
 ### 10.4 使用示例
 
 ```bash
-# 1. 智能推荐：自动按优先级排序
-tia-recommend --db impact_map.db --smart --branch origin/main
+# 1. 查询受影响的测试
+CHANGED=$(git diff --name-only origin/main)
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files $CHANGED
 
 # 输出示例:
-# 🎯 Smart Test Recommendations
-#
-# High Priority Tests (3):
-#   1. test_auth_login         [P: 0.92, Fail: 45%, ~2.5s]
-#   2. test_payment_process    [P: 0.85, Fail: 38%, ~5.1s]
-#   3. test_cache_invalidation [P: 0.78, Fail: 12%, ~1.2s]
-#
-# Medium Priority Tests (5):
-#   ...
+# Affected tests:
+#   test_auth_login
+#   test_payment_process
+#   test_cache_invalidation
 
-# 2. 只运行最易失败的测试
-tia-recommend --db impact_map.db --smart --min-probability 0.3 --top 5
-
-# 3. 分析项目中最脆弱的测试
-tia-recommend --db impact_map.db --flaky
+# 2. 查看数据库统计
+dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 
 # 输出示例:
-# 🔍 Flaky Test Analysis
-#
-# Most Flaky Tests:
-#   1. test_concurrent_access  [Fail Rate: 68%, Streak: 5, Runs: 42]
-#   2. test_network_timeout    [Fail Rate: 52%, Streak: 3, Runs: 89]
-#   3. test_race_condition     [Fail Rate: 43%, Streak: 2, Runs: 31]
+# 📊 Database Statistics:
+#   Source files: 45
+#   Test scripts: 120
+#   Total mappings: 892
 ```
 
 ### 10.5 数据收集
 
 要启用智能推荐，需要在 CI 中记录测试执行结果：
 
-```typescript
-import { initDatabase } from '@tiacc/tools';
+```csharp
+using TiaCC.Core.Services;
 
-// 注意：使用底层 Database API，高层 TiaCC API 暂未暴露此方法
-const db = initDatabase('./impact_map.db');
+// 使用 DatabaseService API 记录测试结果
+var db = new DatabaseService("./impact_map.db");
 
 // 记录测试执行结果
-db.recordTestResult(
-  'test_calculator.cpp',      // testPath
-  true,                       // passed
-  1250,                       // durationMs
-  'abc123',                   // commitHash
-  ['src/calculator.cpp']      // changedFiles
+db.RecordTestResult(
+    testPath: "test_calculator.cpp",
+    passed: true,
+    durationMs: 1250,
+    commitHash: "abc123",
+    changedFiles: new[] { "src/calculator.cpp" }
 );
 ```
 
@@ -900,13 +889,19 @@ db.recordTestResult(
 - 批量插入: 使用事务批处理，100x 性能提升
 - 智能推荐查询: O(n * log n) - 需要计算所有受影响测试的优先级分数
 
-### 11.3 并发处理
+### 11.3 批量处理
 
-`tia-mapper build` 支持并发处理多个覆盖率文件：
+TiaCC CLI 支持批量处理多个覆盖率文件：
 
 ```bash
-# 使用 8 个并发 worker 处理
-tia-mapper build --coverage-dir ./coverage --concurrency 8
+# 批量映射所有覆盖率文件
+for coverage_file in ./coverage/**/coverage.cobertura.xml; do
+  TEST_NAME=$(basename $(dirname "$coverage_file"))
+  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+    --db impact_map.db \
+    --coverage "$coverage_file" \
+    --test "$TEST_NAME"
+done
 ```
 
 ---

@@ -24,39 +24,36 @@
 #### 基础智能推荐
 
 ```bash
-# 启用智能推荐
-tia-recommend --db impact_map.db --smart --branch origin/main
+# 获取变更文件
+CHANGED=$(git diff --name-only origin/main)
+
+# 查询受影响的测试
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files $CHANGED
 
 # 输出示例:
-# 🎯 Smart Test Recommendations
-#
-# High Priority Tests (3):
-#   1. test_auth_login         [Priority: 0.92, Fail: 45%, ~2.5s]
-#   2. test_payment_process    [Priority: 0.85, Fail: 38%, ~5.1s]
-#   3. test_cache_invalidation [Priority: 0.78, Fail: 12%, ~1.2s]
-#
-# Medium Priority Tests (5):
-#   4. test_user_registration  [Priority: 0.65, Fail: 5%, ~1.8s]
-#   ...
-#
-# Recommendation: Run top 3 high-priority tests first
-# Total estimated time: ~10.8s (vs. 45.2s for all tests)
+# Affected tests:
+#   test_auth_login
+#   test_payment_process
+#   test_cache_invalidation
 ```
 
 #### 高级选项
 
 ```bash
-# 只显示优先级最高的 10 个测试
-tia-recommend --db impact_map.db --smart --top 10
+# 显示详细统计信息
+dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 
-# 只运行失败概率 >= 30% 的测试
-tia-recommend --db impact_map.db --smart --min-probability 0.3
-
-# 显示详细的失败概率和执行时间
-tia-recommend --db impact_map.db --smart --show-probability --show-duration
+# 查询特定文件影响的测试
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files src/Calculator.cs src/Utils.cs
 
 # 输出到文件供 CI 使用
-tia-recommend --db impact_map.db --smart --top 20 --output affected_tests.txt
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files $CHANGED > affected_tests.txt
 ```
 
 ### 1.4 优先级评分算法
@@ -117,19 +114,19 @@ failure_correlations (source_file_id, test_script_id, correlation_score, failure
 
 **方式 1: 使用 API**
 
-```typescript
-import { initDatabase } from '@tiacc/tools';
+```csharp
+using TiaCC.Core.Services;
 
-// 注意：TiaCC 高层 API 暂未暴露此方法，使用底层 Database API
-const db = initDatabase('./impact_map.db');
+// 使用 MappingService 记录测试结果
+var mappingService = new MappingService(dbPath);
 
 // 记录测试执行结果
-db.recordTestResult(
-  'tests/test_calculator.cpp',  // testPath
-  true,                           // passed
-  1250,                           // durationMs
-  'abc123',                       // commitHash
-  ['src/calculator.cpp', 'src/math_utils.cpp']  // changedFiles
+mappingService.RecordTestResult(
+    testPath: "tests/TestCalculator.cs",
+    passed: true,
+    durationMs: 1250,
+    commitHash: "abc123",
+    changedFiles: new[] { "src/Calculator.cs", "src/MathUtils.cs" }
 );
 ```
 
@@ -137,9 +134,9 @@ db.recordTestResult(
 
 ```bash
 # 注意：此功能尚未实现，计划在未来版本中提供
-# tia-mapper record-test \
+# dotnet run --project tools-dotnet/TiaCC.Cli -- record-test \
 #   --db impact_map.db \
-#   --test tests/test_calculator.cpp \
+#   --test tests/TestCalculator.cs \
 #   --status pass \
 #   --duration 1250 \
 #   --commit abc123
@@ -148,11 +145,14 @@ db.recordTestResult(
 ### 2.4 查看失败预测
 
 ```bash
-# 查看所有受影响测试的失败预测
-tia-recommend --db impact_map.db --smart --show-probability
+# 查看数据库统计信息
+dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 
-# 只显示高风险测试
-tia-recommend --db impact_map.db --smart --min-probability 0.3
+# 查询受影响的测试
+CHANGED=$(git diff --name-only origin/main)
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files $CHANGED
 ```
 
 ---
@@ -166,52 +166,34 @@ Flaky 测试是指在相同代码下，有时通过、有时失败的不稳定�
 ### 3.2 识别 Flaky 测试
 
 ```bash
-tia-recommend --db impact_map.db --flaky
+# 查看数据库统计
+dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 
 # 输出示例:
-# 🔍 Flaky Test Analysis
+# 📊 Database Statistics:
+#   Source files: 45
+#   Test scripts: 120
+#   Total mappings: 892
 #
-# Most Flaky Tests (Top 10):
-#   1. test_concurrent_access      [Fail Rate: 68%, Streak: 5, Runs: 42]
-#      → Likely cause: Race condition or timing issue
-#
-#   2. test_network_timeout        [Fail Rate: 52%, Streak: 3, Runs: 89]
-#      → Likely cause: External dependency or network instability
-#
-#   3. test_database_transaction   [Fail Rate: 43%, Streak: 2, Runs: 31]
-#      → Likely cause: Database state not properly reset
-#
-# Recommendation:
-#   - Fix flaky tests with >50% failure rate immediately
-#   - Consider quarantining tests with >3 consecutive failures
-#   - Review tests failing on specific files (shown below)
+# Most covered source files:
+#   src/Calculator.cs (15 tests)
+#   src/Database.cs (12 tests)
 ```
 
 ### 3.3 关联分析（计划中）
 
 > ⚠️ **注意**：`--show-correlations` 选项尚未实现，计划在未来版本中提供
 
-```bash
-# 查看特定文件变更时哪些测试最易失败（功能开发中）
-# tia-mapper query src/database.cpp --db impact_map.db --show-correlations
-
-# 预期输出示例:
-# Tests covering src/database.cpp:
-#   1. test_transaction_commit     [Coverage: 85%, Failures: 12/50, Correlation: 0.78]
-#   2. test_connection_pool        [Coverage: 62%, Failures: 5/50, Correlation: 0.45]
-#   3. test_query_builder          [Coverage: 91%, Failures: 2/50, Correlation: 0.12]
-#
-# High correlation (>0.7) indicates this file change frequently causes test failure
-```
-
 **当前可用的替代方案**：
 
 ```bash
 # 查询文件覆盖的测试
-tia-mapper query src/database.cpp --db impact_map.db
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files src/Database.cs
 
-# 使用智能推荐查看失败预测
-tia-recommend --db impact_map.db --smart --show-probability
+# 查看完整统计
+dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 ```
 
 ---
@@ -220,80 +202,59 @@ tia-recommend --db impact_map.db --smart --show-probability
 
 ### 4.1 概述
 
-除了推荐测试文件，TiaCC 还可以精确推荐具体的测试方法（如 `TestCalculator::testAddition`），特别适用于大型测试类。
+除了推荐测试文件，TiaCC 还可以精确推荐具体的测试方法（如 `TestCalculator.TestAddition`），特别适用于大型测试类。
 
 ### 4.2 使用方法
 
 ```bash
-# 输出测试方法而非测试文件
-tia-recommend --db impact_map.db --level function --methods
+# 查询受影响的测试
+CHANGED=$(git diff --name-only origin/main)
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files $CHANGED
 
 # 输出示例:
-# 📋 Recommended Test Methods
-#
-# TestCalculator::testAddition
-# TestCalculator::testSubtraction
-# TestStatistics::testMean
-# TestStatistics::testStdDev
-#
-# Total: 4 test methods (vs. 2 test files)
+# Affected tests:
+#   TestCalculator
+#   TestStatistics
 ```
 
-### 4.3 按类分组
-
-```bash
-tia-recommend --db impact_map.db --methods --group-by-class
-
-# 输出示例:
-# 📋 Recommended Test Methods (Grouped by Class)
-#
-# TestCalculator (2 methods):
-#   - testAddition
-#   - testSubtraction
-#
-# TestStatistics (2 methods):
-#   - testMean
-#   - testStdDev
-#
-# Total: 2 test classes, 4 test methods
-```
-
-### 4.4 集成到测试框架
+### 4.3 集成到测试框架
 
 **示例: xUnit (C#)**
 
 ```bash
-# 生成测试方法列表
-tia-recommend --db impact_map.db --methods --quiet > test_methods.txt
+# 获取受影响的测试
+CHANGED=$(git diff --name-only origin/main)
+AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files $CHANGED)
 
 # 使用 dotnet test 的过滤器运行
-while IFS= read -r method; do
-  dotnet test --filter "FullyQualifiedName~$method"
-done < test_methods.txt
+if [ -n "$AFFECTED" ]; then
+  FILTER=$(echo "$AFFECTED" | tr '\n' '|' | sed 's/|$//')
+  dotnet test --filter "FullyQualifiedName~$FILTER"
+else
+  dotnet test
+fi
 ```
 
-**示例: JUnit (Java)（计划中）**
-
-> ⚠️ **注意**：`--format junit` 选项尚未实现，当前需要手动转换格式
+**示例: NUnit (C#)**
 
 ```bash
-# 生成测试方法列表
-tia-recommend --db impact_map.db --methods --quiet > test_methods.txt
+# 获取受影响的测试
+CHANGED=$(git diff --name-only origin/main)
+AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files $CHANGED)
 
-# 手动转换为 JUnit 格式（ClassName#methodName）
-# 或使用 sed/awk 脚本转换格式
-
-# 使用 JUnit ConsoleLauncher 运行
-# java -jar junit-platform-console-standalone.jar \
-#   --select-method-file test_methods.txt
-```
-
-**当前替代方案**：
-
-```bash
-# 使用测试文件推荐
-tia-recommend --db impact_map.db --quiet > test_files.txt
-cat test_files.txt | xargs mvn test -Dtest=
+# 使用 NUnit 过滤器
+if [ -n "$AFFECTED" ]; then
+  FILTER=$(echo "$AFFECTED" | tr '\n' '|')
+  dotnet test --filter "$FILTER"
+else
+  dotnet test
+fi
 ```
 
 ---
@@ -302,32 +263,33 @@ cat test_files.txt | xargs mvn test -Dtest=
 
 ### 5.1 支持的格式列表
 
-| 语言/生态 | 工具 | 格式 | TiaCC 选项 |
+| 语言/生态 | 工具 | 格式 | TiaCC 支持 |
 |----------|------|------|-----------|
 | C/C++ | LLVM | `.profraw`, `.cov.json` | 默认支持 |
-| C/C++ | gcov/lcov | `.info` | `--lcov` |
-| C/C++ (Windows) | OpenCppCoverage | `CoverageReport*.xml` | `--opencppcoverage` |
-| C#/.NET | Coverlet | `.coverage.json` | 默认支持 |
-| C#/.NET | dotCover | `dotcover*.xml` | `--dotcover` |
-| Java | JaCoCo | `jacoco*.xml` | `--jacoco` |
-| JavaScript/TypeScript | Istanbul/nyc | `coverage*.json` | `--istanbul` |
-| Python | coverage.py | `coverage*.json` | `--coveragepy` |
-| Lua | LuaCov | `luacov*.out` | `--luacov` |
+| C/C++ | gcov/lcov | `.info` | `lcov` |
+| C/C++ (Windows) | OpenCppCoverage | `CoverageReport*.xml` | `opencppcoverage` |
+| C#/.NET | Coverlet | `*.cobertura.xml` | 默认支持 |
+| C#/.NET | dotCover | `dotcover*.xml` | `dotcover` |
+| Java | JaCoCo | `jacoco*.xml` | `jacoco` |
+| Python | coverage.py | `coverage*.json` | `coveragepy` |
+| Lua | LuaCov | `luacov*.out` | `luacov` |
 | 通用 | Cobertura | `*.cobertura.xml` | 默认支持 |
 
 ### 5.2 多语言项目示例
 
 ```bash
-# 混合 C++ 和 C# 项目
-tia-mapper build \
-  --coverage-dir ./coverage \
+# 初始化数据库
+dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+
+# 映射覆盖率数据（自动检测格式）
+dotnet run --project tools-dotnet/TiaCC.Cli -- map \
   --db impact_map.db \
-  --verbose
+  --coverage ./coverage/*.cobertura.xml \
+  --test AllTests
 
 # TiaCC 自动检测格式:
-# - *.cov.json → LLVM
-# - *.coverage.json → Coverlet
 # - *.cobertura.xml → Cobertura (通用)
+# - *.coverage.json → Coverlet
 ```
 
 ### 5.3 自定义测试 ID 提取
@@ -335,35 +297,39 @@ tia-mapper build \
 对于 Cobertura 格式，TiaCC 提供多种方式提取测试 ID：
 
 ```bash
-# 从环境变量读取（适用于 CI）
-export TEST_ID="TestCalculator_testAddition"
-tia-mapper build --coverage-dir ./coverage --test-id-from-env TEST_ID
+# 从文件名解析
+dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+  --db impact_map.db \
+  --coverage ./coverage/TestCalculator.cobertura.xml \
+  --test TestCalculator
 
-# 从 Cobertura XML 的 <source> 标签读取
-tia-mapper build --coverage-dir ./coverage --test-id-from-source
-
-# 从文件名解析（格式: Test_ClassName__test_methodName.cobertura.xml）
-tia-mapper build --coverage-dir ./coverage --test-id-from-filename
+# 批量映射多个测试
+for coverage_file in ./coverage/**/coverage.cobertura.xml; do
+  TEST_NAME=$(basename $(dirname "$coverage_file"))
+  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+    --db impact_map.db \
+    --coverage "$coverage_file" \
+    --test "$TEST_NAME"
+done
 ```
 
 ---
 
 ## 6. 性能优化
 
-### 6.1 并发处理
+### 6.1 批量处理
 
 ```bash
-# 使用 8 个 worker 并发处理覆盖率文件
-tia-mapper build \
-  --coverage-dir ./coverage \
-  --db impact_map.db \
-  --concurrency 8
+# 批量映射所有覆盖率文件
+for coverage_file in ./coverage/**/coverage.cobertura.xml; do
+  TEST_NAME=$(basename $(dirname "$coverage_file"))
+  echo "Mapping coverage for $TEST_NAME..."
+  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+    --db impact_map.db \
+    --coverage "$coverage_file" \
+    --test "$TEST_NAME" || true
+done
 ```
-
-**性能对比**：
-- 串行处理（concurrency=1）: 100 个文件 → 120 秒
-- 并发处理（concurrency=4）: 100 个文件 → 35 秒
-- 并发处理（concurrency=8）: 100 个文件 → 20 秒
 
 ### 6.2 增量更新（计划中）
 
@@ -376,11 +342,14 @@ tia-mapper build \
 ```bash
 # 清理旧数据后重新构建
 rm -rf coverage_data/*.profraw
-tia-mapper build --coverage-dir ./coverage --db impact_map.db
+dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
 
-# 或使用时间戳过滤最近的文件
-find ./coverage -name "*.cov.json" -mtime -1 | while read file; do
-  # 处理最近修改的文件
+# 重新映射
+for coverage_file in ./coverage/*.cobertura.xml; do
+  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+    --db impact_map.db \
+    --coverage "$coverage_file" \
+    --test AllTests
 done
 ```
 
@@ -403,17 +372,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Run all tests with coverage
-        run: ./run_all_tests_with_coverage.sh
+        run: |
+          dotnet test --collect:"XPlat Code Coverage" \
+            --results-directory ./coverage
+
+      - name: Build TiaCC
+        run: dotnet build tools-dotnet -c Release
 
       - name: Build impact map
         run: |
-          npm install -g @tiacc/tools
-          tia-mapper build \
-            --coverage-dir ./coverage \
-            --db impact_map.db \
-            --commit ${{ github.sha }} \
-            --verbose
+          dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+
+          for coverage_file in ./coverage/**/coverage.cobertura.xml; do
+            TEST_NAME=$(basename $(dirname "$coverage_file"))
+            dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+              --db impact_map.db \
+              --coverage "$coverage_file" \
+              --test "$TEST_NAME" || true
+          done
 
       - name: Upload impact map
         uses: actions/upload-artifact@v4
@@ -437,27 +419,40 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Download impact map
         uses: dawidd6/action-download-artifact@v3
         with:
           workflow: nightly.yml
           name: impact-map
+        continue-on-error: true
 
-      - name: Smart test recommendation
-        run: |
-          npm install -g @tiacc/tools
-          tia-recommend \
-            --db impact_map.db \
-            --smart \
-            --top 20 \
-            --branch origin/main \
-            --output affected_tests.txt \
-            --show-probability \
-            --show-duration
+      - name: Build TiaCC
+        run: dotnet build tools-dotnet -c Release
 
-      - name: Run recommended tests
+      - name: Get affected tests
+        id: tiacc
         run: |
-          cat affected_tests.txt | xargs -I {} ./run_test {}
+          if [ -f impact_map.db ]; then
+            CHANGED=$(git diff --name-only origin/main)
+            AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+              --db impact_map.db \
+              --files $CHANGED 2>/dev/null || echo "")
+            echo "affected=$AFFECTED" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run affected tests
+        run: |
+          if [ -n "${{ steps.tiacc.outputs.affected }}" ]; then
+            FILTER=$(echo "${{ steps.tiacc.outputs.affected }}" | tr '\n' '|' | sed 's/|$//')
+            dotnet test --filter "FullyQualifiedName~$FILTER"
+          else
+            dotnet test
+          fi
 ```
 
 ### 7.3 定期质量报告
@@ -473,27 +468,37 @@ jobs:
   quality-report:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Download impact map
         uses: dawidd6/action-download-artifact@v3
         with:
           workflow: nightly.yml
           name: impact-map
 
-      - name: Analyze flaky tests
-        run: |
-          npm install -g @tiacc/tools
-          tia-recommend --db impact_map.db --flaky > flaky_report.txt
+      - name: Build TiaCC
+        run: dotnet build tools-dotnet -c Release
 
-      - name: Create issue for flaky tests
+      - name: Generate stats report
+        run: |
+          dotnet run --project tools-dotnet/TiaCC.Cli -- stats \
+            --db impact_map.db > stats_report.txt
+
+      - name: Create issue for stats
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('flaky_report.txt', 'utf8');
+            const report = fs.readFileSync('stats_report.txt', 'utf8');
             github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '📊 Weekly Flaky Test Report',
+              title: '📊 Weekly TiaCC Statistics Report',
               body: '```\n' + report + '\n```'
             });
 ```
@@ -502,30 +507,40 @@ jobs:
 
 ## 8. 故障排查
 
-### 8.1 智能推荐没有显示失败概率
+### 8.1 查询没有返回结果
 
-**原因**: 数据库中没有历史测试数据
+**原因**: 数据库中没有映射数据或文件路径不匹配
 
 **解决方案**:
 ```bash
-# 检查是否有历史数据
-tia-mapper stats --db impact_map.db
+# 检查数据库统计
+dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 
-# 如果 test_history 表为空，需要先记录测试结果
-# 参考第 2.3 节"记录测试结果"
+# 如果 source_files 表为空，需要先映射覆盖率数据
+dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+  --db impact_map.db \
+  --coverage ./coverage/*.cobertura.xml \
+  --test AllTests
 ```
 
-### 8.2 优先级分数全部为 0
+### 8.2 覆盖率数据缺失
 
-**原因**: 覆盖率数据缺失或没有代码变更
+**原因**: 覆盖率文件格式不正确或路径错误
 
 **解决方案**:
 ```bash
-# 检查是否有代码变更
-git diff --name-only origin/main
+# 检查覆盖率文件是否存在
+ls -la ./coverage/*.cobertura.xml
 
-# 检查覆盖率映射
-tia-mapper query <changed-file> --db impact_map.db
+# 检查覆盖率文件内容
+head -50 ./coverage/coverage.cobertura.xml
+
+# 确保路径正确
+dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+  --db impact_map.db \
+  --coverage "./coverage/coverage.cobertura.xml" \
+  --test "AllTests"
 ```
 
 ---
@@ -550,4 +565,4 @@ tia-mapper query <changed-file> --db impact_map.db
 
 - [架构设计文档](architecture.md)
 - [集成指南](integration-guide.md)
-- [API 文档](../tools-node/README.md)
+- [CI/CD 集成指南](ci-cd-integration.md)

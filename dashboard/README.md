@@ -9,8 +9,6 @@
 ```bash
 cd dashboard
 python -m http.server 8080
-# 或使用 Node.js
-npx serve .
 ```
 
 然后在浏览器访问：http://localhost:8080
@@ -30,12 +28,13 @@ python -m http.server 8080
 
 ### 从映射数据库导出
 
-使用 `tia-mapper export` 命令导出你的项目数据：
+使用 TiaCC CLI 导出你的项目数据：
 
 ```bash
-tia-mapper export \
-  --db impact_map.db \
-  --output ./dashboard/data
+cd tools-dotnet
+dotnet run --project TiaCC.Cli -- export \
+  --db ../impact_map.db \
+  --output ../dashboard/data
 ```
 
 这会在 `dashboard/data/` 目录生成：
@@ -185,16 +184,11 @@ dashboard/
 └── index.html              # 主页面
 ```
 
-### 更新本地依赖
+### 本地依赖
 
-如需更新本地依赖库：
-
-```bash
-cd dashboard
-npm install
-npx tailwindcss -i input.css -o lib/tailwind.min.css --minify
-cp node_modules/d3/dist/d3.min.js lib/d3.v7.min.js
-```
+Dashboard 已包含所有必需的依赖文件，无需安装额外软件包：
+- `lib/d3.v7.min.js` - D3.js 可视化库
+- `lib/tailwind.min.css` - Tailwind CSS 预编译样式
 
 ## 示例项目
 

@@ -11,16 +11,15 @@
 #   unit-tests:
 #     extends: .tiacc-test
 #     script:
-#       - npm test -- $TIACC_TEST_FILTER
+#       - dotnet test --filter "$TIACC_TEST_FILTER"
 
 # Variables (can be overridden in your .gitlab-ci.yml)
 variables:
-  TIACC_VERSION: "latest"
   TIACC_DATABASE: "impact_map.db"
   TIACC_COVERAGE_DIR: "./coverage"
-  TIACC_FORMAT: "auto"
   TIACC_BASE_BRANCH: "origin/main"
   TIACC_VERBOSE: "false"
+  DOTNET_VERSION: "8.0"
 
 # Cache the database between runs
 .tiacc-cache:
@@ -33,32 +32,27 @@ variables:
 # Build job - run nightly to update mappings
 .tiacc-build:
   extends: .tiacc-cache
-  image: node:20
+  image: mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}
   stage: .pre
   script:
-    - npm install -g @tiacc/tools
+    - dotnet build tools-dotnet -c Release
     - |
-      ARGS="build -c $TIACC_COVERAGE_DIR -d $TIACC_DATABASE"
+      dotnet run --project tools-dotnet/TiaCC.Cli -- init --db $TIACC_DATABASE
 
-      # Add format flags
-      case "$TIACC_FORMAT" in
-        lcov) ARGS="$ARGS --lcov" ;;
-        jacoco) ARGS="$ARGS --jacoco" ;;
-        istanbul) ARGS="$ARGS --istanbul" ;;
-        coveragepy) ARGS="$ARGS --coveragepy" ;;
-        dotcover) ARGS="$ARGS --dotcover" ;;
-        opencppcoverage) ARGS="$ARGS --opencppcoverage" ;;
-        auto)
-          # Auto-detect formats
-          if ls $TIACC_COVERAGE_DIR/*.info 2>/dev/null; then ARGS="$ARGS --lcov"; fi
-          if ls $TIACC_COVERAGE_DIR/*jacoco*.xml 2>/dev/null; then ARGS="$ARGS --jacoco"; fi
-          if ls $TIACC_COVERAGE_DIR/coverage-final.json 2>/dev/null; then ARGS="$ARGS --istanbul"; fi
-          ;;
-      esac
+      # Map coverage files
+      for coverage_file in $TIACC_COVERAGE_DIR/**/coverage.cobertura.xml; do
+        if [ -f "$coverage_file" ]; then
+          TEST_NAME=$(basename $(dirname "$coverage_file"))
+          echo "Mapping coverage for $TEST_NAME..."
+          dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+            --db $TIACC_DATABASE \
+            --coverage "$coverage_file" \
+            --test "$TEST_NAME" || true
+        fi
+      done
 
-      if [ "$TIACC_VERBOSE" = "true" ]; then ARGS="$ARGS -v"; fi
-
-      tia-mapper $ARGS
+      # Show statistics
+      dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db $TIACC_DATABASE
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -68,12 +62,11 @@ variables:
 # Recommend job - run on MRs to get affected tests
 .tiacc-recommend:
   extends: .tiacc-cache
-  image: node:20
+  image: mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}
   stage: .pre
   cache:
     policy: pull
   script:
-    - npm install -g @tiacc/tools
     - |
       # Check if database exists
       if [ ! -f "$TIACC_DATABASE" ]; then
@@ -82,18 +75,20 @@ variables:
         exit 0
       fi
 
-      # Get affected tests
-      ARGS="--db $TIACC_DATABASE"
+      # Build TiaCC
+      dotnet build tools-dotnet -c Release
 
+      # Get changed files
       if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
-        ARGS="$ARGS --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+        CHANGED_FILES=$(git diff --name-only origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME)
       else
-        ARGS="$ARGS --base $TIACC_BASE_BRANCH"
+        CHANGED_FILES=$(git diff --name-only $TIACC_BASE_BRANCH)
       fi
 
-      if [ "$TIACC_VERBOSE" = "true" ]; then ARGS="$ARGS -v"; fi
-
-      tia-recommend $ARGS > affected-tests.txt || true
+      # Query affected tests
+      dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+        --db $TIACC_DATABASE \
+        --files $CHANGED_FILES > affected-tests.txt || true
 
       # Output results
       echo "=== TiaCC Test Impact Analysis ==="
@@ -122,7 +117,7 @@ variables:
     - |
       # Read affected tests if available
       if [ -f "affected-tests.txt" ] && [ -s "affected-tests.txt" ]; then
-        export TIACC_TEST_FILTER=$(cat affected-tests.txt | tr '\n' ' ')
+        export TIACC_TEST_FILTER=$(cat affected-tests.txt | tr '\n' '|' | sed 's/|$//')
         echo "Running affected tests: $TIACC_TEST_FILTER"
       else
         echo "Running all tests (no TiaCC filter)"
@@ -142,12 +137,13 @@ tiacc-recommend:
 # test:
 #   extends: .tiacc-test
 #   stage: test
+#   image: mcr.microsoft.com/dotnet/sdk:8.0
 #   script:
 #     - |
 #       if [ -n "$TIACC_TEST_FILTER" ]; then
 #         # Run only affected tests
-#         npm test -- --grep "$TIACC_TEST_FILTER"
+#         dotnet test --filter "FullyQualifiedName~$TIACC_TEST_FILTER"
 #       else
 #         # Run all tests
-#         npm test
+#         dotnet test
 #       fi
