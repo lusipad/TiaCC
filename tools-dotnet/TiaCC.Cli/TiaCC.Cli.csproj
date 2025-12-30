@@ -5,7 +5,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>preview</LangVersion>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tia-mapper</ToolCommandName>
     <PackageOutputPath>./nupkg</PackageOutputPath>

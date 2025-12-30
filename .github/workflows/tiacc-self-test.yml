@@ -25,7 +25,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
 
       - name: Restore dependencies
         working-directory: tools-dotnet
@@ -41,7 +40,7 @@ jobs:
           mkdir -p tiacc-data/coverage
 
           echo "Running tests with coverage..."
-          TEST_CLASSES=("CoverageParserTests" "DatabaseServiceTests" "GitServiceTests" "SymbolExtractorTests")
+          TEST_CLASSES=("CoverageParserTests" "DatabaseServiceTests" "GitServiceTests" "SymbolExtractorTests" "ExportServiceTests" "TiaCCConfigTests" "CoverageDataServiceTests")
 
           for TEST_CLASS in "${TEST_CLASSES[@]}"; do
             echo ""
@@ -113,7 +112,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
 
       - name: Restore and build
         working-directory: tools-dotnet
@@ -207,7 +205,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
 
       - name: Run .NET dogfooding script
         working-directory: tools-dotnet

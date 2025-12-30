@@ -320,8 +320,8 @@ public static class CoverageParser
                 filePath = NormalizePath(filePath, basePath);
 
                 var counters = ParseJacocoCounters(cls.Elements("counter"));
-                var lineCovered = counters.GetValueOrDefault("LINE", (0, 0)).Covered;
-                var lineMissed = counters.GetValueOrDefault("LINE", (0, 0)).Missed;
+                var lineCovered = counters.GetValueOrDefault("LINE", (Missed: 0, Covered: 0)).Covered;
+                var lineMissed = counters.GetValueOrDefault("LINE", (Missed: 0, Covered: 0)).Missed;
                 var lineTotal = lineCovered + lineMissed;
 
                 if (lineCovered > 0)
@@ -353,7 +353,7 @@ public static class CoverageParser
                     var methodName = method.Attribute("name")?.Value ?? "";
                     var methodLine = int.Parse(method.Attribute("line")?.Value ?? "0");
                     var methodCounters = ParseJacocoCounters(method.Elements("counter"));
-                    var methodCovered = methodCounters.GetValueOrDefault("LINE", (0, 0)).Covered;
+                    var methodCovered = methodCounters.GetValueOrDefault("LINE", (Missed: 0, Covered: 0)).Covered;
 
                     if (methodCovered > 0)
                     {
@@ -376,7 +376,7 @@ public static class CoverageParser
 
     private static Dictionary<string, (int Missed, int Covered)> ParseJacocoCounters(IEnumerable<XElement> counters)
     {
-        var result = new Dictionary<string, (int, int)>();
+        var result = new Dictionary<string, (int Missed, int Covered)>();
         foreach (var counter in counters)
         {
             var type = counter.Attribute("type")?.Value ?? "";

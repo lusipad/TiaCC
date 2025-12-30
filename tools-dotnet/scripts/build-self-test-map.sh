@@ -33,14 +33,14 @@ echo "Discovering tests..."
 TEST_PROJECT="$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
 
 # Get list of test methods using dotnet test --list-tests
-TEST_LIST=$(dotnet test "$TEST_PROJECT" --list-tests --no-build 2>/dev/null | grep -E "^\s+\w+Tests\.\w+" || true)
+TEST_LIST=$(dotnet test "$TEST_PROJECT" -c Release --list-tests 2>/dev/null | grep -E "^\s+\w+Tests\.\w+" || true)
 
 if [ -z "$TEST_LIST" ]; then
     echo "No tests found. Running all tests to generate coverage..."
 
     # Run all tests with coverage
     dotnet test "$TEST_PROJECT" \
-        --no-build \
+        -c Release \
         --collect:"XPlat Code Coverage" \
         --results-directory "$COVERAGE_DIR" \
         -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
@@ -59,7 +59,7 @@ else
     echo "Found tests, running individually..."
 
     # Run each test class separately to get independent coverage
-    for TEST_CLASS in CoverageParserTests DatabaseServiceTests; do
+    for TEST_CLASS in CoverageParserTests DatabaseServiceTests GitServiceTests SymbolExtractorTests ExportServiceTests TiaCCConfigTests CoverageDataServiceTests; do
         echo ""
         echo "Running: $TEST_CLASS"
 
@@ -69,7 +69,7 @@ else
 
         # Run test class with coverage
         dotnet test "$TEST_PROJECT" \
-            --no-build \
+            -c Release \
             --filter "FullyQualifiedName~$TEST_CLASS" \
             --collect:"XPlat Code Coverage" \
             --results-directory "$COVERAGE_DIR/$TEST_CLASS" \
