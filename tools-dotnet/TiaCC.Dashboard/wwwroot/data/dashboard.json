@@ -10,15 +10,20 @@
     {"id": 7, "path": "TiaCC.Core/Models/TestScript.cs", "hash": "ts007", "lastScanned": "2025-12-30T10:00:00Z"},
     {"id": 8, "path": "TiaCC.Core/Models/CoverageMap.cs", "hash": "cm008", "lastScanned": "2025-12-30T10:00:00Z"},
     {"id": 9, "path": "TiaCC.Core/Models/Symbol.cs", "hash": "sy009", "lastScanned": "2025-12-30T10:00:00Z"},
-    {"id": 10, "path": "TiaCC.Core/Data/TiaCCDbContext.cs", "hash": "dc010", "lastScanned": "2025-12-30T10:00:00Z"},
-    {"id": 11, "path": "TiaCC.Cli/Program.cs", "hash": "pm011", "lastScanned": "2025-12-30T10:00:00Z"}
+    {"id": 10, "path": "TiaCC.Core/Models/TiaCCConfig.cs", "hash": "tc010", "lastScanned": "2025-12-30T10:00:00Z"},
+    {"id": 11, "path": "TiaCC.Core/Data/TiaCCDbContext.cs", "hash": "dc011", "lastScanned": "2025-12-30T10:00:00Z"},
+    {"id": 12, "path": "TiaCC.Cli/Program.cs", "hash": "pm012", "lastScanned": "2025-12-30T10:00:00Z"},
+    {"id": 13, "path": "TiaCC.Dashboard/Services/CoverageDataService.cs", "hash": "cd013", "lastScanned": "2025-12-30T10:00:00Z"},
+    {"id": 14, "path": "TiaCC.Dashboard/Models/CoverageModels.cs", "hash": "cm014", "lastScanned": "2025-12-30T10:00:00Z"}
   ],
   "testScripts": [
     {"id": 1, "name": "DatabaseServiceTests", "lastRun": "2025-12-30T12:00:00Z"},
     {"id": 2, "name": "CoverageParserTests", "lastRun": "2025-12-30T12:00:00Z"},
     {"id": 3, "name": "GitServiceTests", "lastRun": "2025-12-30T12:00:00Z"},
     {"id": 4, "name": "SymbolExtractorTests", "lastRun": "2025-12-30T12:00:00Z"},
-    {"id": 5, "name": "ExportServiceTests", "lastRun": "2025-12-30T12:00:00Z"}
+    {"id": 5, "name": "ExportServiceTests", "lastRun": "2025-12-30T12:00:00Z"},
+    {"id": 6, "name": "TiaCCConfigTests", "lastRun": "2025-12-30T12:00:00Z"},
+    {"id": 7, "name": "CoverageDataServiceTests", "lastRun": "2025-12-30T12:00:00Z"}
   ],
   "coverageMap": [
     {"sourceFileId": 1, "testScriptId": 1, "coveragePercentage": 0, "hitCount": 0},
@@ -30,7 +35,10 @@
     {"sourceFileId": 7, "testScriptId": 1, "coveragePercentage": 0, "hitCount": 0},
     {"sourceFileId": 8, "testScriptId": 1, "coveragePercentage": 0, "hitCount": 0},
     {"sourceFileId": 9, "testScriptId": 4, "coveragePercentage": 0, "hitCount": 0},
-    {"sourceFileId": 10, "testScriptId": 1, "coveragePercentage": 0, "hitCount": 0}
+    {"sourceFileId": 10, "testScriptId": 6, "coveragePercentage": 0, "hitCount": 0},
+    {"sourceFileId": 11, "testScriptId": 1, "coveragePercentage": 0, "hitCount": 0},
+    {"sourceFileId": 13, "testScriptId": 7, "coveragePercentage": 0, "hitCount": 0},
+    {"sourceFileId": 14, "testScriptId": 7, "coveragePercentage": 0, "hitCount": 0}
   ],
   "symbols": [],
   "symbolCoverage": [],

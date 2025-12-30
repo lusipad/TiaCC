@@ -59,7 +59,7 @@ else
     echo "Found tests, running individually..."
 
     # Run each test class separately to get independent coverage
-    for TEST_CLASS in CoverageParserTests DatabaseServiceTests GitServiceTests SymbolExtractorTests ExportServiceTests; do
+    for TEST_CLASS in CoverageParserTests DatabaseServiceTests GitServiceTests SymbolExtractorTests ExportServiceTests TiaCCConfigTests CoverageDataServiceTests; do
         echo ""
         echo "Running: $TEST_CLASS"
 
