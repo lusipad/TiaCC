@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2024-12-30T00:00:00Z",
+  "sourceFiles": [
+    {"id": 1, "path": "src/core/calculator.cpp", "hash": "abc123", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 2, "path": "src/core/utils.cpp", "hash": "def456", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 3, "path": "src/core/math.cpp", "hash": "ghi789", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 4, "path": "src/io/reader.cpp", "hash": "jkl012", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 5, "path": "src/io/writer.cpp", "hash": "mno345", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 6, "path": "src/net/client.cpp", "hash": "pqr678", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 7, "path": "src/net/server.cpp", "hash": "stu901", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 8, "path": "include/core/calculator.h", "hash": "vwx234", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 9, "path": "include/core/utils.h", "hash": "yza567", "lastScanned": "2024-12-29T10:00:00Z"},
+    {"id": 10, "path": "include/io/reader.h", "hash": "bcd890", "lastScanned": "2024-12-29T10:00:00Z"}
+  ],
+  "testScripts": [
+    {"id": 1, "name": "test_calculator", "lastRun": "2024-12-29T12:00:00Z"},
+    {"id": 2, "name": "test_utils", "lastRun": "2024-12-29T12:00:00Z"},
+    {"id": 3, "name": "test_io", "lastRun": "2024-12-29T12:00:00Z"},
+    {"id": 4, "name": "test_network", "lastRun": "2024-12-29T12:00:00Z"},
+    {"id": 5, "name": "test_integration", "lastRun": "2024-12-29T12:00:00Z"}
+  ],
+  "coverageMap": [
+    {"sourceFileId": 1, "testScriptId": 1, "coveragePercentage": 95.5, "hitCount": 150},
+    {"sourceFileId": 1, "testScriptId": 5, "coveragePercentage": 85.0, "hitCount": 120},
+    {"sourceFileId": 2, "testScriptId": 2, "coveragePercentage": 78.3, "hitCount": 89},
+    {"sourceFileId": 2, "testScriptId": 5, "coveragePercentage": 70.0, "hitCount": 75},
+    {"sourceFileId": 3, "testScriptId": 1, "coveragePercentage": 88.9, "hitCount": 200},
+    {"sourceFileId": 4, "testScriptId": 3, "coveragePercentage": 62.5, "hitCount": 45},
+    {"sourceFileId": 5, "testScriptId": 3, "coveragePercentage": 55.0, "hitCount": 38},
+    {"sourceFileId": 6, "testScriptId": 4, "coveragePercentage": 45.2, "hitCount": 67},
+    {"sourceFileId": 7, "testScriptId": 4, "coveragePercentage": 38.8, "hitCount": 55},
+    {"sourceFileId": 8, "testScriptId": 1, "coveragePercentage": 100.0, "hitCount": 20},
+    {"sourceFileId": 9, "testScriptId": 2, "coveragePercentage": 92.0, "hitCount": 15},
+    {"sourceFileId": 10, "testScriptId": 3, "coveragePercentage": 80.0, "hitCount": 12}
+  ],
+  "symbols": [],
+  "symbolCoverage": []
+}

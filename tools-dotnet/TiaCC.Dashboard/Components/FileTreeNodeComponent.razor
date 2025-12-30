@@ -1,0 +1,61 @@
+@using TiaCC.Dashboard.Models
+
+<div class="tree-node">
+    <div class="tree-node-content" @onclick="Toggle">
+        <span class="tree-icon">
+            @if (Node.IsDirectory)
+            {
+                @(Node.IsExpanded ? "📂" : "📁")
+            }
+            else
+            {
+                @("📄")
+            }
+        </span>
+        <span>@Node.Name</span>
+        @if (Node.Coverage.HasValue)
+        {
+            <span style="margin-left: auto; font-size: 0.75rem;">
+                <span class="@GetCoverageClass(Node.Coverage.Value)">
+                    @Node.Coverage.Value.ToString("F1")%
+                </span>
+            </span>
+        }
+        @if (Node.IsDirectory && Node.Children.Count > 0)
+        {
+            <span style="color: var(--text-muted); font-size: 0.75rem;">
+                (@Node.Children.Count)
+            </span>
+        }
+    </div>
+
+    @if (Node.IsExpanded && Node.IsDirectory)
+    {
+        <div class="tree-children">
+            @foreach (var child in Node.Children.OrderByDescending(c => c.IsDirectory).ThenBy(c => c.Name))
+            {
+                <FileTreeNodeComponent Node="child" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public FileTreeNode Node { get; set; } = new();
+
+    private void Toggle()
+    {
+        if (Node.IsDirectory)
+        {
+            Node.IsExpanded = !Node.IsExpanded;
+        }
+    }
+
+    private static string GetCoverageClass(double coverage) => coverage switch
+    {
+        >= 80 => "coverage-high",
+        >= 50 => "coverage-medium",
+        _ => "coverage-low"
+    };
+}

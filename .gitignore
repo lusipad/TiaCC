@@ -38,6 +38,10 @@ coverage_data/*.profdata
 coverage_data/*.json
 *.coverage.json
 
+# TiaCC dogfooding data
+tiacc-data/
+TestResults/
+
 # Database (generated)
 *.db
 *.db-journal

@@ -1,0 +1,133 @@
+@page "/"
+@inject CoverageDataService DataService
+
+<PageTitle>TiaCC Dashboard - Overview</PageTitle>
+
+@if (_loading)
+{
+    <div class="loading">
+        <div class="spinner"></div>
+        <p>Loading coverage data...</p>
+    </div>
+}
+else
+{
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Total Files</div>
+            <div class="stat-value">@_stats.totalFiles</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Covered Files</div>
+            <div class="stat-value">@_stats.coveredFiles</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Average Coverage</div>
+            <div class="stat-value">@_stats.avgCoverage.ToString("F1")%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Tests</div>
+            <div class="stat-value">@_stats.totalTests</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2 class="card-title">Module Coverage</h2>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Files</th>
+                        <th>Covered</th>
+                        <th>Coverage</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var module in _modules)
+                    {
+                        <tr>
+                            <td><strong>@module.ModuleName</strong></td>
+                            <td>@module.FileCount</td>
+                            <td>@module.CoveredFiles</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <div class="coverage-bar">
+                                        <div class="coverage-fill @GetCoverageClass(module.AverageCoverage)"
+                                             style="width: @module.AverageCoverage%"></div>
+                                    </div>
+                                    <span>@module.AverageCoverage.ToString("F1")%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <button class="btn btn-outline" @onclick="() => ToggleModule(module.ModuleName)">
+                                    @(_expandedModules.Contains(module.ModuleName) ? "▼" : "▶")
+                                </button>
+                            </td>
+                        </tr>
+                        @if (_expandedModules.Contains(module.ModuleName))
+                        {
+                            @foreach (var file in module.Files)
+                            {
+                                <tr style="background: var(--bg-color);">
+                                    <td style="padding-left: 2rem;">@file.FileName</td>
+                                    <td colspan="2">
+                                        @foreach (var test in file.Tests.Take(3))
+                                        {
+                                            <span class="tag">@test</span>
+                                        }
+                                        @if (file.Tests.Count > 3)
+                                        {
+                                            <span class="tag">+@(file.Tests.Count - 3) more</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <div class="coverage-bar">
+                                                <div class="coverage-fill @GetCoverageClass(file.Coverage)"
+                                                     style="width: @file.Coverage%"></div>
+                                            </div>
+                                            <span>@file.Coverage.ToString("F1")%</span>
+                                        </div>
+                                    </td>
+                                    <td></td>
+                                </tr>
+                            }
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private (int totalFiles, int coveredFiles, double avgCoverage, int totalTests) _stats;
+    private List<ModuleCoverage> _modules = [];
+    private HashSet<string> _expandedModules = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await DataService.LoadDataAsync();
+        _stats = DataService.GetStatistics();
+        _modules = DataService.GetModuleCoverages();
+        _loading = false;
+    }
+
+    private void ToggleModule(string moduleName)
+    {
+        if (!_expandedModules.Remove(moduleName))
+        {
+            _expandedModules.Add(moduleName);
+        }
+    }
+
+    private static string GetCoverageClass(double coverage) => coverage switch
+    {
+        >= 80 => "coverage-high",
+        >= 50 => "coverage-medium",
+        _ => "coverage-low"
+    };
+}
