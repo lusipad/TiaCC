@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TiaCC - Simplified Coverage View</title>
+    <link href="lib/tailwind.min.css" rel="stylesheet">
+    <script src="lib/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --glass-bg: rgba(30, 41, 59, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --primary: #6366f1;
+            --secondary: #ec4899;
+            --accent: #22d3ee;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.15) 0%, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+        }
+
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .glass-header {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.2);
+            border-radius: 3px;
+        }
+
+        .search-input {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            transition: all 0.2s;
+        }
+        .search-input:focus {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        .coverage-bar {
+            height: 8px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+        }
+        .coverage-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .file-tree-item {
+            cursor: pointer;
+            transition: background 0.15s;
+            border-radius: 6px;
+        }
+        .file-tree-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .file-tree-item.expanded {
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .function-item {
+            border-left: 3px solid transparent;
+            transition: all 0.15s;
+        }
+        .function-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+            border-left-color: var(--primary);
+        }
+
+        .module-node {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .module-node:hover {
+            filter: brightness(1.2);
+        }
+
+        .module-link {
+            fill: none;
+            stroke-opacity: 0.6;
+        }
+
+        .badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 9999px;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            color: var(--text-muted);
+        }
+        .tab-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .tab-btn.active {
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--primary);
+        }
+
+        .highlight {
+            background: rgba(99, 102, 241, 0.3);
+            border-radius: 2px;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--glass-border);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-6">
+    <!-- Header -->
+    <header class="glass-header fixed top-0 left-0 right-0 z-50 px-6 py-3">
+        <div class="flex items-center justify-between max-w-7xl mx-auto">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-pink-500 flex items-center justify-center">
+                    <span class="text-white font-bold text-sm">T</span>
+                </div>
+                <h1 class="text-lg font-semibold">TiaCC Coverage Explorer</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <a href="index.html" class="text-sm text-slate-400 hover:text-white transition">
+                    Full Dashboard
+                </a>
+                <div id="stats-summary" class="text-sm text-slate-400"></div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto pt-20 space-y-6">
+        <!-- Search Section -->
+        <section class="glass-panel rounded-xl p-4">
+            <div class="flex items-center gap-4">
+                <div class="flex-1 relative">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <input type="text" id="search-input"
+                           class="search-input w-full pl-10 pr-4 py-3 rounded-lg text-white placeholder-slate-400"
+                           placeholder="Search files or functions... (e.g., calculator, toUpperCase)">
+                </div>
+                <div class="flex gap-2">
+                    <button id="filter-files" class="tab-btn active">Files</button>
+                    <button id="filter-functions" class="tab-btn">Functions</button>
+                    <button id="filter-all" class="tab-btn">All</button>
+                </div>
+            </div>
+            <div id="search-results" class="mt-4 hidden"></div>
+        </section>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Module Coverage Table -->
+            <section class="glass-panel rounded-xl p-4">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    Module Coverage
+                </h2>
+                <div id="module-table" class="space-y-3"></div>
+            </section>
+
+            <!-- Simplified Module Graph -->
+            <section class="glass-panel rounded-xl p-4">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                    </svg>
+                    Module Dependencies
+                    <span class="text-xs text-slate-400 ml-2">(Click module to expand)</span>
+                </h2>
+                <div id="module-graph" class="h-64"></div>
+            </section>
+        </div>
+
+        <!-- Expandable File Tree -->
+        <section class="glass-panel rounded-xl p-4">
+            <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                File Tree
+                <span class="text-xs text-slate-400 ml-2">(Click to expand)</span>
+            </h2>
+            <div id="file-tree" class="space-y-1"></div>
+        </section>
+    </main>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <script>
+        // Global data store
+        let appData = {
+            mappings: [],
+            symbols: { symbols: [], stats: {} },
+            directoryCoverage: [],
+            sourceFiles: [],
+            testScripts: [],
+            graph: { nodes: [], links: [] }
+        };
+
+        // Current filter state
+        let currentFilter = 'files';
+        let expandedDirs = new Set();
+        let expandedFiles = new Set();
+
+        // Load data
+        async function loadData() {
+            try {
+                const [mappings, symbols, dirCoverage, sourceFiles, testScripts, graph] = await Promise.all([
+                    fetch('./data/mappings.json').then(r => r.json()),
+                    fetch('./data/symbols.json').then(r => r.json()),
+                    fetch('./data/directory-coverage.json').then(r => r.json()),
+                    fetch('./data/source-files.json').then(r => r.json()),
+                    fetch('./data/test-scripts.json').then(r => r.json()),
+                    fetch('./data/graph.json').then(r => r.json())
+                ]);
+
+                appData = { mappings, symbols, directoryCoverage: dirCoverage, sourceFiles, testScripts, graph };
+
+                updateStatsSummary();
+                renderModuleTable();
+                renderFileTree();
+                renderModuleGraph();
+            } catch (err) {
+                console.error('Failed to load data:', err);
+            }
+        }
+
+        // Update stats summary
+        function updateStatsSummary() {
+            const fileCount = appData.sourceFiles.length;
+            const funcCount = appData.symbols.stats?.symbols || 0;
+            const avgCoverage = appData.directoryCoverage.reduce((sum, d) => sum + d.avgCoverage, 0) /
+                               (appData.directoryCoverage.length || 1);
+
+            document.getElementById('stats-summary').innerHTML = `
+                <span class="text-white">${fileCount}</span> files |
+                <span class="text-white">${funcCount}</span> functions |
+                <span class="text-white">${avgCoverage.toFixed(1)}%</span> avg coverage
+            `;
+        }
+
+        // Get coverage color
+        function getCoverageColor(coverage) {
+            if (coverage >= 80) return '#10b981'; // green
+            if (coverage >= 50) return '#f59e0b'; // yellow
+            return '#ef4444'; // red
+        }
+
+        // Get coverage class
+        function getCoverageClass(coverage) {
+            if (coverage >= 80) return 'bg-emerald-500';
+            if (coverage >= 50) return 'bg-amber-500';
+            return 'bg-red-500';
+        }
+
+        // Render module coverage table
+        function renderModuleTable() {
+            const container = document.getElementById('module-table');
+
+            if (appData.directoryCoverage.length === 0) {
+                container.innerHTML = '<div class="empty-state">No coverage data available</div>';
+                return;
+            }
+
+            const sorted = [...appData.directoryCoverage].sort((a, b) => b.avgCoverage - a.avgCoverage);
+
+            container.innerHTML = sorted.map(dir => `
+                <div class="file-tree-item p-3" onclick="focusDirectory('${dir.directory}')">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                            </svg>
+                            <span class="font-medium">${dir.directory}/</span>
+                        </div>
+                        <div class="flex items-center gap-3 text-sm">
+                            <span class="text-slate-400">${dir.fileCount} files</span>
+                            <span class="text-slate-400">${dir.testCount} tests</span>
+                            <span class="font-semibold" style="color: ${getCoverageColor(dir.avgCoverage)}">
+                                ${dir.avgCoverage.toFixed(1)}%
+                            </span>
+                        </div>
+                    </div>
+                    <div class="coverage-bar">
+                        <div class="coverage-fill ${getCoverageClass(dir.avgCoverage)}"
+                             style="width: ${dir.avgCoverage}%"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Build file tree structure
+        function buildFileTree() {
+            const tree = {};
+
+            // Group files by directory
+            appData.mappings.forEach(m => {
+                const parts = m.sourceFile.split('/');
+                const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+                const file = parts[parts.length - 1];
+
+                if (!tree[dir]) tree[dir] = {};
+                if (!tree[dir][file]) tree[dir][file] = { tests: [], coverage: 0 };
+
+                tree[dir][file].tests.push({
+                    name: m.testScript,
+                    coverage: m.lineCoveragePct
+                });
+                tree[dir][file].coverage = Math.max(tree[dir][file].coverage, m.lineCoveragePct);
+            });
+
+            // Add functions to files
+            appData.symbols.symbols.forEach(sym => {
+                const parts = sym.sourceFile.split('/');
+                const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+                const file = parts[parts.length - 1];
+
+                if (tree[dir] && tree[dir][file]) {
+                    if (!tree[dir][file].functions) tree[dir][file].functions = [];
+
+                    // Skip lambda/internal functions
+                    if (!sym.symbolName.includes('lambda') && !sym.symbolName.includes('??')) {
+                        const maxCov = sym.tests.reduce((max, t) => Math.max(max, t.coverage), 0);
+                        tree[dir][file].functions.push({
+                            name: sym.symbolName,
+                            lines: `${sym.startLine}-${sym.endLine}`,
+                            coverage: maxCov,
+                            tests: sym.tests
+                        });
+                    }
+                }
+            });
+
+            return tree;
+        }
+
+        // Render file tree
+        function renderFileTree() {
+            const container = document.getElementById('file-tree');
+            const tree = buildFileTree();
+
+            if (Object.keys(tree).length === 0) {
+                container.innerHTML = '<div class="empty-state">No files found</div>';
+                return;
+            }
+
+            let html = '';
+
+            Object.keys(tree).sort().forEach(dir => {
+                const dirExpanded = expandedDirs.has(dir);
+                const files = tree[dir];
+                const fileCount = Object.keys(files).length;
+
+                // Calculate directory average
+                const avgCov = Object.values(files).reduce((sum, f) => sum + f.coverage, 0) / fileCount;
+
+                html += `
+                    <div class="file-tree-item p-2 ${dirExpanded ? 'expanded' : ''}"
+                         onclick="toggleDir('${dir}')">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-slate-400 transition-transform ${dirExpanded ? 'rotate-90' : ''}"
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                            <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                            </svg>
+                            <span class="font-medium">${dir}/</span>
+                            <span class="text-xs text-slate-400">(${fileCount} files)</span>
+                            <div class="flex-1"></div>
+                            <span class="text-sm" style="color: ${getCoverageColor(avgCov)}">
+                                ${avgCov.toFixed(1)}%
+                            </span>
+                        </div>
+                    </div>
+                `;
+
+                if (dirExpanded) {
+                    Object.keys(files).sort().forEach(fileName => {
+                        const file = files[fileName];
+                        const fullPath = `${dir}/${fileName}`;
+                        const fileExpanded = expandedFiles.has(fullPath);
+
+                        html += `
+                            <div class="ml-6">
+                                <div class="file-tree-item p-2 ${fileExpanded ? 'expanded' : ''}"
+                                     onclick="event.stopPropagation(); toggleFile('${fullPath}')">
+                                    <div class="flex items-center gap-2">
+                                        <svg class="w-4 h-4 text-slate-400 transition-transform ${fileExpanded ? 'rotate-90' : ''}"
+                                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                        </svg>
+                                        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                        </svg>
+                                        <span>${fileName}</span>
+                                        <div class="flex-1"></div>
+                                        ${file.functions ? `<span class="badge bg-slate-700">${file.functions.length} funcs</span>` : ''}
+                                        <span class="text-sm" style="color: ${getCoverageColor(file.coverage)}">
+                                            ${file.coverage.toFixed(1)}%
+                                        </span>
+                                    </div>
+                                </div>
+                        `;
+
+                        if (fileExpanded && file.functions) {
+                            html += '<div class="ml-6 mt-1 space-y-1">';
+                            file.functions.forEach(func => {
+                                html += `
+                                    <div class="function-item p-2 pl-4 rounded text-sm">
+                                        <div class="flex items-center gap-2">
+                                            <svg class="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                                            </svg>
+                                            <span class="text-slate-300">${func.name}</span>
+                                            <span class="text-xs text-slate-500">L${func.lines}</span>
+                                            <div class="flex-1"></div>
+                                            <span class="text-xs" style="color: ${getCoverageColor(func.coverage)}">
+                                                ${func.coverage.toFixed(0)}%
+                                            </span>
+                                        </div>
+                                        <div class="mt-1 flex gap-1 flex-wrap">
+                                            ${func.tests.map(t => `
+                                                <span class="badge ${t.coverage > 0 ? 'bg-emerald-900 text-emerald-300' : 'bg-slate-700 text-slate-400'}">
+                                                    ${t.testPath}
+                                                </span>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                            html += '</div>';
+                        }
+
+                        html += '</div>';
+                    });
+                }
+            });
+
+            container.innerHTML = html;
+        }
+
+        // Toggle directory
+        function toggleDir(dir) {
+            if (expandedDirs.has(dir)) {
+                expandedDirs.delete(dir);
+            } else {
+                expandedDirs.add(dir);
+            }
+            renderFileTree();
+        }
+
+        // Toggle file
+        function toggleFile(file) {
+            if (expandedFiles.has(file)) {
+                expandedFiles.delete(file);
+            } else {
+                expandedFiles.add(file);
+            }
+            renderFileTree();
+        }
+
+        // Focus on directory (from module table click)
+        function focusDirectory(dir) {
+            expandedDirs.add(dir);
+            renderFileTree();
+            document.getElementById('file-tree').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Render module dependency graph
+        function renderModuleGraph() {
+            const container = document.getElementById('module-graph');
+            const width = container.clientWidth;
+            const height = container.clientHeight || 256;
+
+            // Clear previous
+            container.innerHTML = '';
+
+            // Build module-level nodes
+            const moduleMap = new Map();
+
+            // Group by directory
+            appData.directoryCoverage.forEach(d => {
+                moduleMap.set(d.directory, {
+                    id: d.directory,
+                    type: 'module',
+                    label: d.directory,
+                    fileCount: d.fileCount,
+                    testCount: d.testCount,
+                    coverage: d.avgCoverage
+                });
+            });
+
+            // Add test modules if not already present
+            appData.testScripts.forEach(t => {
+                const dir = t.scriptPath.split('/')[0] || 'tests';
+                if (!moduleMap.has(dir)) {
+                    moduleMap.set(dir, {
+                        id: dir,
+                        type: 'test-module',
+                        label: dir,
+                        fileCount: 0,
+                        testCount: 1,
+                        coverage: 0
+                    });
+                }
+            });
+
+            const nodes = Array.from(moduleMap.values());
+
+            // Build links based on coverage mappings
+            const linkMap = new Map();
+            appData.mappings.forEach(m => {
+                const srcDir = m.sourceFile.split('/')[0];
+                const testDir = 'tests'; // Tests are typically in tests/
+
+                if (srcDir !== testDir) {
+                    const key = `${srcDir}->${testDir}`;
+                    if (!linkMap.has(key)) {
+                        linkMap.set(key, { source: srcDir, target: testDir, coverage: 0, count: 0 });
+                    }
+                    const link = linkMap.get(key);
+                    link.coverage += m.lineCoveragePct;
+                    link.count++;
+                }
+            });
+
+            const links = Array.from(linkMap.values()).map(l => ({
+                ...l,
+                coverage: l.coverage / l.count
+            }));
+
+            // Create SVG
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            // Create simulation
+            const simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collide', d3.forceCollide().radius(50));
+
+            // Draw links
+            const link = svg.append('g')
+                .selectAll('line')
+                .data(links)
+                .join('line')
+                .attr('class', 'module-link')
+                .attr('stroke', d => getCoverageColor(d.coverage))
+                .attr('stroke-width', d => Math.max(2, d.count * 2));
+
+            // Draw nodes
+            const node = svg.append('g')
+                .selectAll('g')
+                .data(nodes)
+                .join('g')
+                .attr('class', 'module-node')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            // Node circles
+            node.append('circle')
+                .attr('r', d => 20 + d.fileCount * 3)
+                .attr('fill', d => getCoverageColor(d.coverage))
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 2);
+
+            // Node labels
+            node.append('text')
+                .text(d => d.label)
+                .attr('text-anchor', 'middle')
+                .attr('dy', d => 35 + d.fileCount * 3)
+                .attr('fill', '#f8fafc')
+                .attr('font-size', '12px');
+
+            // Coverage labels inside nodes
+            node.append('text')
+                .text(d => `${d.coverage.toFixed(0)}%`)
+                .attr('text-anchor', 'middle')
+                .attr('dy', 4)
+                .attr('fill', '#fff')
+                .attr('font-size', '11px')
+                .attr('font-weight', 'bold');
+
+            // Click handler
+            node.on('click', (event, d) => {
+                focusDirectory(d.id);
+            });
+
+            // Tooltip
+            const tooltip = document.getElementById('tooltip');
+            node.on('mouseover', (event, d) => {
+                tooltip.innerHTML = `
+                    <div class="font-semibold">${d.label}/</div>
+                    <div class="text-slate-400 text-xs mt-1">
+                        ${d.fileCount} files | ${d.testCount} tests<br>
+                        Coverage: <span style="color: ${getCoverageColor(d.coverage)}">${d.coverage.toFixed(1)}%</span>
+                    </div>
+                `;
+                tooltip.classList.remove('hidden');
+                tooltip.style.left = (event.pageX + 10) + 'px';
+                tooltip.style.top = (event.pageY - 10) + 'px';
+            }).on('mouseout', () => {
+                tooltip.classList.add('hidden');
+            });
+
+            // Update positions
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+
+            // Drag functions
+            function dragstarted(event) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                event.subject.fx = event.subject.x;
+                event.subject.fy = event.subject.y;
+            }
+
+            function dragged(event) {
+                event.subject.fx = event.x;
+                event.subject.fy = event.y;
+            }
+
+            function dragended(event) {
+                if (!event.active) simulation.alphaTarget(0);
+                event.subject.fx = null;
+                event.subject.fy = null;
+            }
+        }
+
+        // Search functionality
+        function performSearch(query) {
+            const resultsContainer = document.getElementById('search-results');
+
+            if (!query.trim()) {
+                resultsContainer.classList.add('hidden');
+                return;
+            }
+
+            const q = query.toLowerCase();
+            let results = [];
+
+            // Search files
+            if (currentFilter === 'files' || currentFilter === 'all') {
+                appData.sourceFiles.forEach(f => {
+                    if (f.filePath.toLowerCase().includes(q)) {
+                        results.push({
+                            type: 'file',
+                            name: f.filePath,
+                            coverage: getCoverageForFile(f.filePath)
+                        });
+                    }
+                });
+            }
+
+            // Search functions
+            if (currentFilter === 'functions' || currentFilter === 'all') {
+                appData.symbols.symbols.forEach(s => {
+                    if (s.symbolName.toLowerCase().includes(q) && !s.symbolName.includes('lambda')) {
+                        const maxCov = s.tests.reduce((max, t) => Math.max(max, t.coverage), 0);
+                        results.push({
+                            type: 'function',
+                            name: s.symbolName,
+                            file: s.sourceFile,
+                            lines: `L${s.startLine}-${s.endLine}`,
+                            coverage: maxCov
+                        });
+                    }
+                });
+            }
+
+            // Render results
+            if (results.length === 0) {
+                resultsContainer.innerHTML = '<div class="text-slate-400 py-4 text-center">No results found</div>';
+            } else {
+                resultsContainer.innerHTML = results.slice(0, 20).map(r => {
+                    const highlighted = highlightMatch(r.name, query);
+                    if (r.type === 'file') {
+                        return `
+                            <div class="file-tree-item p-2 flex items-center justify-between"
+                                 onclick="navigateToFile('${r.name}')">
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                    </svg>
+                                    <span>${highlighted}</span>
+                                </div>
+                                <span style="color: ${getCoverageColor(r.coverage)}">${r.coverage.toFixed(1)}%</span>
+                            </div>
+                        `;
+                    } else {
+                        return `
+                            <div class="file-tree-item p-2"
+                                 onclick="navigateToFunction('${r.file}', '${r.name}')">
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                                    </svg>
+                                    <span>${highlighted}</span>
+                                    <span class="text-xs text-slate-500">${r.lines}</span>
+                                </div>
+                                <div class="flex items-center justify-between mt-1 ml-6 text-xs">
+                                    <span class="text-slate-400">${r.file}</span>
+                                    <span style="color: ${getCoverageColor(r.coverage)}">${r.coverage.toFixed(0)}%</span>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }).join('');
+            }
+
+            resultsContainer.classList.remove('hidden');
+        }
+
+        // Highlight search match
+        function highlightMatch(text, query) {
+            const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
+            return text.replace(regex, '<span class="highlight">$1</span>');
+        }
+
+        function escapeRegex(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        // Get coverage for a file
+        function getCoverageForFile(filePath) {
+            const mapping = appData.mappings.find(m => m.sourceFile === filePath);
+            return mapping ? mapping.lineCoveragePct : 0;
+        }
+
+        // Navigate to file
+        function navigateToFile(filePath) {
+            const parts = filePath.split('/');
+            const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+            expandedDirs.add(dir);
+            expandedFiles.add(filePath);
+            renderFileTree();
+
+            document.getElementById('search-results').classList.add('hidden');
+            document.getElementById('search-input').value = '';
+            document.getElementById('file-tree').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Navigate to function
+        function navigateToFunction(filePath, funcName) {
+            navigateToFile(filePath);
+        }
+
+        // Setup event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            loadData();
+
+            // Search input
+            const searchInput = document.getElementById('search-input');
+            let searchTimeout;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => performSearch(e.target.value), 150);
+            });
+
+            // Filter buttons
+            ['filter-files', 'filter-functions', 'filter-all'].forEach(id => {
+                document.getElementById(id).addEventListener('click', (e) => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    currentFilter = id.replace('filter-', '');
+                    performSearch(searchInput.value);
+                });
+            });
+
+            // Resize handler for graph
+            window.addEventListener('resize', () => {
+                renderModuleGraph();
+            });
+        });
+    </script>
+</body>
+</html>
