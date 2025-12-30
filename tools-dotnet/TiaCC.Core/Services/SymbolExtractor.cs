@@ -261,6 +261,35 @@ public class SymbolExtractor
 
         return string.Join(".", parts);
     }
+
+    private static string GetFullTypeName(EnumDeclarationSyntax enumDecl)
+    {
+        var parts = new List<string> { enumDecl.Identifier.Text };
+
+        // Walk up to find containing types/namespaces
+        var parent = enumDecl.Parent;
+        while (parent != null)
+        {
+            switch (parent)
+            {
+                case TypeDeclarationSyntax parentType:
+                    parts.Insert(0, parentType.Identifier.Text);
+                    break;
+                case EnumDeclarationSyntax parentEnum:
+                    parts.Insert(0, parentEnum.Identifier.Text);
+                    break;
+                case NamespaceDeclarationSyntax ns:
+                    parts.Insert(0, ns.Name.ToString());
+                    break;
+                case FileScopedNamespaceDeclarationSyntax fsns:
+                    parts.Insert(0, fsns.Name.ToString());
+                    break;
+            }
+            parent = parent.Parent;
+        }
+
+        return string.Join(".", parts);
+    }
 }
 
 /// <summary>

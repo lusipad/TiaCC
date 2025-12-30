@@ -376,7 +376,7 @@ public static class CoverageParser
 
     private static Dictionary<string, (int Missed, int Covered)> ParseJacocoCounters(IEnumerable<XElement> counters)
     {
-        var result = new Dictionary<string, (int, int)>();
+        var result = new Dictionary<string, (int Missed, int Covered)>();
         foreach (var counter in counters)
         {
             var type = counter.Attribute("type")?.Value ?? "";
