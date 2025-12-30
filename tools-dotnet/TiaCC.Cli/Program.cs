@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Spectre.Console;
+using TiaCC.Core.Models;
 using TiaCC.Core.Services;
 
 namespace TiaCC.Cli;
@@ -96,12 +97,88 @@ class Program
             await ExecuteWithErrorHandling(() => StatsCommandAsync(db));
         }, dbOption);
 
+        // recommend command
+        var recommendCommand = new Command("recommend", "Recommend tests based on Git changes");
+        var baseRefOption = new Option<string?>(
+            aliases: ["--base", "-B"],
+            description: "Base Git ref for comparison (default: auto-detect)");
+        var headRefOption = new Option<string?>(
+            aliases: ["--head", "-H"],
+            description: "Head Git ref for comparison (default: current)");
+        var uncommittedOption = new Option<bool>(
+            aliases: ["--uncommitted", "-u"],
+            description: "Include uncommitted changes",
+            getDefaultValue: () => true);
+        var formatOption = new Option<string>(
+            aliases: ["--format", "-F"],
+            description: "Output format (list, json, ci)",
+            getDefaultValue: () => "list");
+        recommendCommand.AddOption(dbOption);
+        recommendCommand.AddOption(baseRefOption);
+        recommendCommand.AddOption(headRefOption);
+        recommendCommand.AddOption(uncommittedOption);
+        recommendCommand.AddOption(formatOption);
+        recommendCommand.SetHandler(async (string db, string? baseRef, string? headRef, bool uncommitted, string format) =>
+        {
+            await ExecuteWithErrorHandling(() => RecommendCommandAsync(db, baseRef, headRef, uncommitted, format));
+        }, dbOption, baseRefOption, headRefOption, uncommittedOption, formatOption);
+
+        // run command
+        var runCommand = new Command("run", "Run affected tests based on Git changes");
+        var runnerOption = new Option<string>(
+            aliases: ["--runner", "-r"],
+            description: "Test runner command (e.g., dotnet test, pytest, npm test)",
+            getDefaultValue: () => "dotnet test");
+        var argsOption = new Option<string?>(
+            aliases: ["--args", "-a"],
+            description: "Additional arguments to pass to the test runner");
+        var dryRunOption = new Option<bool>(
+            aliases: ["--dry-run"],
+            description: "Show what would be run without executing",
+            getDefaultValue: () => false);
+        runCommand.AddOption(dbOption);
+        runCommand.AddOption(baseRefOption);
+        runCommand.AddOption(headRefOption);
+        runCommand.AddOption(uncommittedOption);
+        runCommand.AddOption(runnerOption);
+        runCommand.AddOption(argsOption);
+        runCommand.AddOption(dryRunOption);
+        runCommand.SetHandler(async (string db, string? baseRef, string? headRef, bool uncommitted, string runner, string? extraArgs, bool dryRun) =>
+        {
+            await ExecuteWithErrorHandling(() => RunCommandAsync(db, baseRef, headRef, uncommitted, runner, extraArgs, dryRun));
+        }, dbOption, baseRefOption, headRefOption, uncommittedOption, runnerOption, argsOption, dryRunOption);
+
+        // config command
+        var configCommand = new Command("config", "Manage TiaCC configuration");
+
+        var configInitCommand = new Command("init", "Initialize configuration file");
+        var configPathOption = new Option<string?>(
+            aliases: ["--path", "-p"],
+            description: "Path for config file (default: .tiacc/config.json)");
+        configInitCommand.AddOption(configPathOption);
+        configInitCommand.SetHandler(async (string? path) =>
+        {
+            await ExecuteWithErrorHandling(() => ConfigInitCommandAsync(path));
+        }, configPathOption);
+
+        var configShowCommand = new Command("show", "Show current configuration");
+        configShowCommand.SetHandler(async () =>
+        {
+            await ExecuteWithErrorHandling(() => ConfigShowCommandAsync());
+        });
+
+        configCommand.AddCommand(configInitCommand);
+        configCommand.AddCommand(configShowCommand);
+
         rootCommand.AddCommand(initCommand);
         rootCommand.AddCommand(scanCommand);
         rootCommand.AddCommand(mapCommand);
         rootCommand.AddCommand(exportCommand);
         rootCommand.AddCommand(queryCommand);
         rootCommand.AddCommand(statsCommand);
+        rootCommand.AddCommand(recommendCommand);
+        rootCommand.AddCommand(runCommand);
+        rootCommand.AddCommand(configCommand);
 
         return await rootCommand.InvokeAsync(args);
     }
@@ -413,5 +490,352 @@ class Program
 
             AnsiConsole.Write(dirTable);
         }
+    }
+
+    static async Task RecommendCommandAsync(string dbPath, string? baseRef, string? headRef, bool includeUncommitted, string format)
+    {
+        if (!File.Exists(dbPath))
+        {
+            throw new FileNotFoundException("Database not found. Run 'init' and 'map' first.", dbPath);
+        }
+
+        var gitService = new GitService();
+
+        if (!gitService.IsGitRepository())
+        {
+            throw new InvalidOperationException("Not a Git repository. The recommend command requires Git.");
+        }
+
+        // Collect changed files
+        var changedFiles = new HashSet<string>();
+
+        // Include uncommitted changes if requested
+        if (includeUncommitted)
+        {
+            foreach (var file in gitService.GetUncommittedChanges())
+            {
+                changedFiles.Add(file);
+            }
+        }
+
+        // Get changes between refs
+        if (!string.IsNullOrEmpty(baseRef))
+        {
+            foreach (var file in gitService.GetChangedFiles(baseRef, headRef))
+            {
+                changedFiles.Add(file);
+            }
+        }
+        else if (!includeUncommitted)
+        {
+            // Default: changes in last commit
+            foreach (var file in gitService.GetChangedFilesInLastCommits(1))
+            {
+                changedFiles.Add(file);
+            }
+        }
+
+        if (changedFiles.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No changed files detected.[/]");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[cyan]Changed files ({changedFiles.Count}):[/]");
+        foreach (var file in changedFiles.Take(10))
+        {
+            AnsiConsole.MarkupLine($"  [dim]{file}[/]");
+        }
+        if (changedFiles.Count > 10)
+        {
+            AnsiConsole.MarkupLine($"  [dim]... and {changedFiles.Count - 10} more[/]");
+        }
+
+        await using var db = new DatabaseService(dbPath);
+
+        var affectedTests = new HashSet<string>();
+        foreach (var file in changedFiles)
+        {
+            var tests = await db.GetTestsForSourceFileAsync(file);
+            foreach (var test in tests)
+            {
+                affectedTests.Add(test.ScriptPath);
+            }
+        }
+
+        if (affectedTests.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No affected tests found for the changed files.[/]");
+            return;
+        }
+
+        // Output based on format
+        switch (format.ToLowerInvariant())
+        {
+            case "json":
+                var json = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    changedFiles = changedFiles.ToList(),
+                    affectedTests = affectedTests.OrderBy(t => t).ToList()
+                }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                Console.WriteLine(json);
+                break;
+
+            case "ci":
+                // CI-friendly output: just test names, one per line
+                foreach (var test in affectedTests.OrderBy(t => t))
+                {
+                    Console.WriteLine(test);
+                }
+                break;
+
+            default: // "list"
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine($"[green]Recommended tests ({affectedTests.Count}):[/]");
+                var table = new Table();
+                table.AddColumn("Test Script");
+                foreach (var test in affectedTests.OrderBy(t => t))
+                {
+                    table.AddRow($"[cyan]{test}[/]");
+                }
+                AnsiConsole.Write(table);
+                break;
+        }
+    }
+
+    static async Task RunCommandAsync(string dbPath, string? baseRef, string? headRef, bool includeUncommitted, string runner, string? extraArgs, bool dryRun)
+    {
+        if (!File.Exists(dbPath))
+        {
+            throw new FileNotFoundException("Database not found. Run 'init' and 'map' first.", dbPath);
+        }
+
+        var gitService = new GitService();
+
+        if (!gitService.IsGitRepository())
+        {
+            throw new InvalidOperationException("Not a Git repository. The run command requires Git.");
+        }
+
+        // Collect changed files
+        var changedFiles = new HashSet<string>();
+
+        if (includeUncommitted)
+        {
+            foreach (var file in gitService.GetUncommittedChanges())
+            {
+                changedFiles.Add(file);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(baseRef))
+        {
+            foreach (var file in gitService.GetChangedFiles(baseRef, headRef))
+            {
+                changedFiles.Add(file);
+            }
+        }
+        else if (!includeUncommitted)
+        {
+            foreach (var file in gitService.GetChangedFilesInLastCommits(1))
+            {
+                changedFiles.Add(file);
+            }
+        }
+
+        if (changedFiles.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No changed files detected. Skipping tests.[/]");
+            return;
+        }
+
+        await using var db = new DatabaseService(dbPath);
+
+        var affectedTests = new HashSet<string>();
+        foreach (var file in changedFiles)
+        {
+            var tests = await db.GetTestsForSourceFileAsync(file);
+            foreach (var test in tests)
+            {
+                affectedTests.Add(test.ScriptPath);
+            }
+        }
+
+        if (affectedTests.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No affected tests found. Skipping test run.[/]");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[cyan]Changed files:[/] {changedFiles.Count}");
+        AnsiConsole.MarkupLine($"[cyan]Affected tests:[/] {affectedTests.Count}");
+        AnsiConsole.WriteLine();
+
+        // Build the test filter
+        var testFilter = BuildTestFilter(runner, affectedTests);
+        var fullCommand = $"{runner} {testFilter}";
+        if (!string.IsNullOrEmpty(extraArgs))
+        {
+            fullCommand += $" {extraArgs}";
+        }
+
+        if (dryRun)
+        {
+            AnsiConsole.MarkupLine("[yellow]Dry run mode - would execute:[/]");
+            AnsiConsole.MarkupLine($"[dim]{fullCommand}[/]");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[green]Running:[/] {fullCommand}");
+        AnsiConsole.WriteLine();
+
+        // Execute the test runner
+        using var process = new System.Diagnostics.Process
+        {
+            StartInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = GetShell(),
+                Arguments = GetShellArgs(fullCommand),
+                UseShellExecute = false,
+                CreateNoWindow = false
+            }
+        };
+
+        process.Start();
+        await process.WaitForExitAsync();
+
+        Environment.ExitCode = process.ExitCode;
+
+        if (process.ExitCode == 0)
+        {
+            AnsiConsole.MarkupLine("[green]Tests passed![/]");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[red]Tests failed with exit code {process.ExitCode}[/]");
+        }
+    }
+
+    static string BuildTestFilter(string runner, HashSet<string> tests)
+    {
+        // Build appropriate filter based on test runner
+        if (runner.Contains("dotnet"))
+        {
+            // For dotnet test, use --filter
+            var filter = string.Join("|", tests.Select(t => Path.GetFileNameWithoutExtension(t)));
+            return $"--filter \"{filter}\"";
+        }
+        else if (runner.Contains("pytest"))
+        {
+            // For pytest, list test files
+            return string.Join(" ", tests.Select(t => $"\"{t}\""));
+        }
+        else if (runner.Contains("npm") || runner.Contains("jest"))
+        {
+            // For Jest/npm, use --testPathPattern
+            var pattern = string.Join("|", tests.Select(t => Path.GetFileName(t)));
+            return $"--testPathPattern=\"{pattern}\"";
+        }
+        else
+        {
+            // Generic: just list the test files
+            return string.Join(" ", tests.Select(t => $"\"{t}\""));
+        }
+    }
+
+    static string GetShell()
+    {
+        return OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
+    }
+
+    static string GetShellArgs(string command)
+    {
+        return OperatingSystem.IsWindows() ? $"/c {command}" : $"-c \"{command.Replace("\"", "\\\"")}\"";
+    }
+
+    static Task ConfigInitCommandAsync(string? configPath)
+    {
+        var path = configPath ?? TiaCCConfig.GetDefaultPath(Directory.GetCurrentDirectory());
+
+        if (File.Exists(path))
+        {
+            if (!AnsiConsole.Confirm($"Configuration file already exists at {path}. Overwrite?", false))
+            {
+                AnsiConsole.MarkupLine("[yellow]Aborted.[/]");
+                return Task.CompletedTask;
+            }
+        }
+
+        var config = new TiaCCConfig();
+        config.Save(path);
+
+        AnsiConsole.MarkupLine($"[green]Configuration file created:[/] {path}");
+        AnsiConsole.MarkupLine("[dim]Edit this file to customize TiaCC behavior.[/]");
+
+        return Task.CompletedTask;
+    }
+
+    static Task ConfigShowCommandAsync()
+    {
+        var configPath = TiaCCConfig.FindConfigFile(Directory.GetCurrentDirectory());
+
+        if (configPath == null)
+        {
+            AnsiConsole.MarkupLine("[yellow]No configuration file found.[/]");
+            AnsiConsole.MarkupLine("[dim]Run 'tiacc config init' to create one.[/]");
+            return Task.CompletedTask;
+        }
+
+        AnsiConsole.MarkupLine($"[cyan]Configuration file:[/] {configPath}");
+        AnsiConsole.WriteLine();
+
+        var config = TiaCCConfig.Load(configPath);
+
+        var tree = new Tree("[bold]TiaCC Configuration[/]");
+
+        // Database
+        tree.AddNode($"[cyan]Database:[/] {config.Database}");
+
+        // Source patterns
+        var patternsNode = tree.AddNode("[cyan]Source Patterns[/]");
+        foreach (var pattern in config.SourcePatterns)
+        {
+            patternsNode.AddNode($"[dim]{pattern}[/]");
+        }
+
+        // Exclude dirs
+        var excludeNode = tree.AddNode("[cyan]Exclude Directories[/]");
+        foreach (var dir in config.ExcludeDirs)
+        {
+            excludeNode.AddNode($"[dim]{dir}[/]");
+        }
+
+        // Test runner
+        var runnerNode = tree.AddNode("[cyan]Test Runner[/]");
+        runnerNode.AddNode($"Command: {config.TestRunner.Command}");
+        if (!string.IsNullOrEmpty(config.TestRunner.Args))
+            runnerNode.AddNode($"Args: {config.TestRunner.Args}");
+        if (!string.IsNullOrEmpty(config.TestRunner.WorkingDir))
+            runnerNode.AddNode($"Working Dir: {config.TestRunner.WorkingDir}");
+
+        // Coverage
+        var coverageNode = tree.AddNode("[cyan]Coverage[/]");
+        coverageNode.AddNode($"Format: {config.Coverage.Format}");
+        coverageNode.AddNode($"Path: {config.Coverage.Path}");
+        coverageNode.AddNode($"Pattern: {config.Coverage.Pattern}");
+
+        // Git
+        var gitNode = tree.AddNode("[cyan]Git[/]");
+        gitNode.AddNode($"Base Branch: {config.Git.BaseBranch}");
+        gitNode.AddNode($"Include Uncommitted: {config.Git.IncludeUncommitted}");
+
+        // Dashboard
+        var dashNode = tree.AddNode("[cyan]Dashboard[/]");
+        dashNode.AddNode($"Output Dir: {config.Dashboard.OutputDir}");
+        dashNode.AddNode($"Format: {config.Dashboard.Format}");
+
+        AnsiConsole.Write(tree);
+
+        return Task.CompletedTask;
     }
 }
