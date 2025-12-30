@@ -7,8 +7,16 @@ using Xunit;
 
 namespace TiaCC.Dashboard.Tests;
 
-public class CoverageDataServiceTests
+public class CoverageDataServiceTests : IDisposable
 {
+    private MockHttpMessageHandler? _mockHttp;
+
+    public void Dispose()
+    {
+        _mockHttp?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
     private static DashboardData CreateTestData()
     {
         return new DashboardData
@@ -36,14 +44,15 @@ public class CoverageDataServiceTests
         };
     }
 
-    private static CoverageDataService CreateService(DashboardData data)
+    private CoverageDataService CreateService(DashboardData data)
     {
-        var mockHttp = new MockHttpMessageHandler();
+        _mockHttp?.Dispose();
+        _mockHttp = new MockHttpMessageHandler();
         var json = JsonSerializer.Serialize(data);
-        mockHttp.When("http://localhost/data/dashboard.json")
+        _mockHttp.When("http://localhost/data/dashboard.json")
             .Respond("application/json", json);
 
-        var httpClient = mockHttp.ToHttpClient();
+        var httpClient = _mockHttp.ToHttpClient();
         httpClient.BaseAddress = new Uri("http://localhost/");
 
         return new CoverageDataService(httpClient);
@@ -340,7 +349,7 @@ public class CoverageDataServiceTests
         var service = CreateService(testData);
         await service.LoadDataAsync();
 
-        var (totalFiles, coveredFiles, avgCoverage, totalTests) = service.GetStatistics();
+        var (totalFiles, coveredFiles, _, totalTests) = service.GetStatistics();
 
         Assert.Equal(4, totalFiles);
         Assert.Equal(2, totalTests);
@@ -353,7 +362,7 @@ public class CoverageDataServiceTests
         var testData = CreateTestData();
         var service = CreateService(testData);
 
-        var (totalFiles, coveredFiles, avgCoverage, totalTests) = service.GetStatistics();
+        var (totalFiles, _, _, totalTests) = service.GetStatistics();
 
         Assert.Equal(0, totalFiles);
         Assert.Equal(0, totalTests);

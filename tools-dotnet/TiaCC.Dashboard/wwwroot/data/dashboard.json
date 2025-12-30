@@ -37,6 +37,7 @@
     {"sourceFileId": 9, "testScriptId": 4, "coveragePercentage": 0, "hitCount": 0},
     {"sourceFileId": 10, "testScriptId": 6, "coveragePercentage": 0, "hitCount": 0},
     {"sourceFileId": 11, "testScriptId": 1, "coveragePercentage": 0, "hitCount": 0},
+    {"sourceFileId": 12, "testScriptId": 1, "coveragePercentage": 0, "hitCount": 0},
     {"sourceFileId": 13, "testScriptId": 7, "coveragePercentage": 0, "hitCount": 0},
     {"sourceFileId": 14, "testScriptId": 7, "coveragePercentage": 0, "hitCount": 0}
   ],
