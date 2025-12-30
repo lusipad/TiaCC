@@ -14,8 +14,8 @@
 │  2. Lua 测试框架 ──IPC──> TiaCC 覆盖率服务                   │
 │  3. 测试运行 ──生成──> .profraw / .coverage.json            │
 │  4. 处理覆盖率 ──llvm-cov──> .cov.json (预处理 JSON)        │
-│  5. Nightly CI ──tia-mapper──> impact_map.db                │
-│  6. PR/提交时 ──tia-recommend──> 受影响的测试列表            │
+│  5. Nightly CI ──TiaCC CLI──> impact_map.db                 │
+│  6. PR/提交时 ──TiaCC CLI──> 受影响的测试列表                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -94,7 +94,7 @@ endif()
 ### 3.1 复制 Lua 钩子文件
 
 ```bash
-cp TiaCC/lua/tia_hooks.lua your_project/scripts/
+cp TiaCC/clients/tia_hooks.lua your_project/scripts/
 ```
 
 ### 3.2 修改你的测试运行器
@@ -228,10 +228,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: '20'
+          dotnet-version: '8.0.x'
 
       - name: Build with coverage
         run: |
@@ -245,14 +245,19 @@ jobs:
           lua scripts/run_all_tests.lua
           kill %1
 
+      - name: Build TiaCC CLI
+        run: |
+          cd TiaCC/tools-dotnet
+          dotnet build -c Release
+
       - name: Build impact map
         run: |
-          cd TiaCC/tools-node
-          npm install
-          npx tia-mapper build \
-            --coverage-dir ../coverage_data \
+          cd TiaCC/tools-dotnet
+          dotnet run --project TiaCC.Cli -- init --db ../impact_map.db
+          dotnet run --project TiaCC.Cli -- map \
             --db ../impact_map.db \
-            --executable ../build/bin/your_game_engine
+            --coverage ../coverage_data/*.cobertura.xml \
+            --test AllTests
 
       - name: Upload impact map
         uses: actions/upload-artifact@v4
@@ -280,22 +285,31 @@ jobs:
         with:
           fetch-depth: 0  # 需要完整历史来计算 diff
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Download impact map
         uses: dawidd6/action-download-artifact@v3
         with:
           workflow: nightly-coverage.yml
           name: impact-map
 
+      - name: Build TiaCC CLI
+        run: |
+          cd TiaCC/tools-dotnet
+          dotnet build -c Release
+
       - name: Get affected tests
         id: affected
         run: |
-          cd TiaCC/tools-node
-          npm install
-          npx tia-recommend \
+          CHANGED=$(git diff --name-only origin/main)
+          cd TiaCC/tools-dotnet
+          dotnet run --project TiaCC.Cli -- query \
             --db ../../impact_map.db \
-            --branch origin/main \
-            --output ../../affected_tests.txt \
-            --quiet
+            --files $CHANGED \
+            > ../../affected_tests.txt
 
           TEST_COUNT=$(wc -l < ../../affected_tests.txt)
           echo "count=$TEST_COUNT" >> $GITHUB_OUTPUT
@@ -320,27 +334,29 @@ jobs:
 ### 安装 TiaCC 工具
 
 ```bash
-# 全局安装 CLI 工具
-cd TiaCC/tools-node
-npm install
-npm link  # 创建全局命令
+# 构建 TiaCC CLI
+cd TiaCC/tools-dotnet
+dotnet build -c Release
+
+# 添加别名方便使用
+alias tiacc="dotnet run --project /path/to/TiaCC/tools-dotnet/TiaCC.Cli --"
 ```
 
 ### 日常使用
 
 ```bash
-# 查看当前改动影响哪些测试
-tia-recommend --branch origin/main
+# 初始化数据库
+tiacc init --db impact_map.db
 
-# 只运行受影响的测试
-tia-recommend --branch origin/main --output tests.txt
-cat tests.txt | xargs -I {} lua {}
+# 映射覆盖率数据
+tiacc map --db impact_map.db --coverage ./coverage/*.xml --test MyTests
+
+# 查看当前改动影响哪些测试
+CHANGED=$(git diff --name-only origin/main)
+tiacc query --db impact_map.db --files $CHANGED
 
 # 查看数据库统计
-tia-mapper stats --db impact_map.db
-
-# 查询某个文件被哪些测试覆盖
-tia-mapper query src/engine/physics.cpp
+tiacc stats --db impact_map.db
 ```
 
 ---
@@ -360,15 +376,15 @@ tia-mapper query src/engine/physics.cpp
   - [ ] 配置服务启动方式
 
 - [ ] **工具安装**
-  - [ ] 安装 Node.js 18+
-  - [ ] 安装 TiaCC tools-node 依赖
+  - [ ] 安装 .NET 8.0+
+  - [ ] 构建 TiaCC tools-dotnet
 
 - [ ] **CI/CD**
   - [ ] Nightly: 运行全量测试生成映射
   - [ ] PR: 下载映射并推荐测试
 
 - [ ] **本地开发**
-  - [ ] 配置 `tia-recommend` 命令
+  - [ ] 配置 TiaCC CLI 命令
   - [ ] (可选) Git pre-push hook
 
 ---
@@ -409,7 +425,7 @@ rm -rf coverage_data/*.profraw
 
 ```bash
 # 重新运行映射生成
-tia-mapper build --coverage-dir ./coverage_data --db impact_map.db
+tiacc map --db impact_map.db --coverage ./coverage/*.xml --test AllTests
 ```
 
 ---

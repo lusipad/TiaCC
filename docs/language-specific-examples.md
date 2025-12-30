@@ -12,93 +12,93 @@ TiaCC 是一个通用的测试影响分析工具，可以集成到**任何项目
 
 1. 项目有自动化测试
 2. 测试框架能生成覆盖率报告
-3. 支持的覆盖率格式之一：
+3. 安装 .NET 8.0 SDK
+4. 支持的覆盖率格式之一：
    - Cobertura XML (通用)
    - LCOV (C++/Go)
    - JaCoCo (Java)
-   - Istanbul/nyc (JavaScript/TypeScript)
    - coverage.py (Python)
    - Coverlet (C#/.NET)
 
 ---
 
-## 🎯 场景 1: JavaScript/TypeScript 项目
+## 🎯 场景 1: .NET/C# 项目
 
 ### 项目结构
 ```
 my-project/
 ├── src/
-│   ├── utils.ts
-│   └── calculator.ts
+│   ├── Utils.cs
+│   └── Calculator.cs
 ├── tests/
-│   ├── utils.test.ts
-│   └── calculator.test.ts
-├── package.json
-└── vitest.config.ts (或 jest.config.js)
+│   ├── UtilsTests.cs
+│   └── CalculatorTests.cs
+├── MyProject.sln
+└── impact_map.db
 ```
 
 ### 步骤
 
-#### 1️⃣ 配置测试框架生成 Cobertura 覆盖率
-
-**Vitest** (`vitest.config.ts`):
-```typescript
-export default defineConfig({
-  test: {
-    coverage: {
-      provider: 'v8',
-      reporter: ['cobertura', 'text'],
-    },
-  },
-});
-```
-
-**Jest** (`jest.config.js`):
-```javascript
-module.exports = {
-  coverageReporters: ['cobertura', 'text'],
-};
-```
-
-#### 2️⃣ 安装 TiaCC
+#### 1️⃣ 安装 Coverlet
 
 ```bash
-npm install -D @tiacc/tools
+dotnet add tests/MyProject.Tests package coverlet.collector
 ```
 
-#### 3️⃣ 添加脚本到 `package.json`
-
-```json
-{
-  "scripts": {
-    "test:coverage": "vitest run --coverage",
-    "tiacc:build": "tia-mapper build --coverage-dir ./coverage --db tiacc.db",
-    "tiacc:recommend": "tia-recommend --db tiacc.db"
-  }
-}
-```
-
-#### 4️⃣ Nightly 构建映射数据库
+#### 2️⃣ 运行测试并生成覆盖率
 
 ```bash
-# 在 main 分支或 nightly CI 中运行
-npm run test:coverage
-npm run tiacc:build
+dotnet test \
+  --collect:"XPlat Code Coverage" \
+  --results-directory ./coverage \
+  -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+```
+
+#### 3️⃣ 构建 TiaCC 并初始化数据库
+
+```bash
+# 克隆 TiaCC（如果还没有）
+git clone https://github.com/your-org/TiaCC.git
+
+# 构建 TiaCC CLI
+cd TiaCC/tools-dotnet
+dotnet build -c Release
+
+# 初始化数据库
+dotnet run --project TiaCC.Cli -- init --db ../../impact_map.db
+```
+
+#### 4️⃣ 映射覆盖率数据
+
+```bash
+# 映射覆盖率到测试
+for coverage_file in ./coverage/**/coverage.cobertura.xml; do
+  TEST_NAME=$(basename $(dirname "$coverage_file"))
+  dotnet run --project TiaCC.Cli -- map \
+    --db ../../impact_map.db \
+    --coverage "$coverage_file" \
+    --test "$TEST_NAME"
+done
 ```
 
 #### 5️⃣ PR 时获取受影响的测试
 
 ```bash
 # 检测变更的文件
-git diff --name-only origin/main...HEAD > changed.txt
+CHANGED=$(git diff --name-only origin/main)
 
 # 获取受影响的测试
-npm run tiacc:recommend -- --branch origin/main
+AFFECTED=$(dotnet run --project TiaCC.Cli -- query \
+  --db ../../impact_map.db \
+  --files $CHANGED)
 
-# 输出示例:
-# 🎯 Recommended tests:
-#   ✓ tests/calculator.test.ts
-# 💡 You can skip 3 out of 4 tests (75% reduction)
+# 运行受影响的测试
+if [ -n "$AFFECTED" ]; then
+  FILTER=$(echo "$AFFECTED" | tr '\n' '|' | sed 's/|$//')
+  dotnet test --filter "FullyQualifiedName~$FILTER"
+else
+  dotnet test
+fi
 ```
 
 ---
@@ -119,11 +119,10 @@ my-project/
 
 ### 步骤
 
-#### 1️⃣ 安装 TiaCC 和 coverage.py
+#### 1️⃣ 安装 coverage.py
 
 ```bash
 pip install coverage
-npm install -g @tiacc/tools
 ```
 
 #### 2️⃣ 配置 coverage.py 生成 Cobertura
@@ -148,18 +147,25 @@ coverage xml -o coverage/cobertura-coverage.xml
 #### 4️⃣ 构建映射数据库
 
 ```bash
-tia-mapper build \
-  --coverage-dir ./coverage \
-  --db tiacc.db \
-  --coveragepy
+# 构建 TiaCC CLI
+cd TiaCC/tools-dotnet
+dotnet build -c Release
+
+# 初始化并映射
+dotnet run --project TiaCC.Cli -- init --db ../../impact_map.db
+dotnet run --project TiaCC.Cli -- map \
+  --db ../../impact_map.db \
+  --coverage ../../coverage/cobertura-coverage.xml \
+  --test AllTests
 ```
 
 #### 5️⃣ 获取受影响的测试
 
 ```bash
-tia-recommend \
-  --db tiacc.db \
-  --changed-files src/calculator.py
+CHANGED=$(git diff --name-only origin/main)
+dotnet run --project TiaCC.Cli -- query \
+  --db ../../impact_map.db \
+  --files $CHANGED
 ```
 
 ---
@@ -202,9 +208,10 @@ g++ -fprofile-arcs -ftest-coverage -o my_app src/*.cpp
 # 转换为 profdata
 llvm-profdata merge *.profraw -o coverage.profdata
 
-# 导出 JSON
+# 导出为 Cobertura 格式（需要 llvm-cov-to-cobertura 工具）
 llvm-cov export ./my_app -instr-profile=coverage.profdata \
-  -format=text > coverage.json
+  -format=lcov > coverage.lcov
+lcov_cobertura coverage.lcov -o coverage.cobertura.xml
 ```
 
 **GCC (gcov)**:
@@ -214,52 +221,83 @@ llvm-cov export ./my_app -instr-profile=coverage.profdata \
 
 # 生成 LCOV 覆盖率
 lcov --capture --directory . --output-file coverage.info
+
+# 转换为 Cobertura
+lcov_cobertura coverage.info -o coverage.cobertura.xml
 ```
 
 #### 3️⃣ 构建映射数据库
 
 ```bash
-# LLVM 格式
-tia-mapper build \
-  --coverage-dir ./coverage \
-  --db tiacc.db \
-  --executable ./my_app
+# 构建 TiaCC CLI
+cd TiaCC/tools-dotnet
+dotnet build -c Release
 
-# LCOV 格式
-tia-mapper build \
-  --coverage-dir . \
-  --db tiacc.db \
-  --lcov \
-  --lcov-pattern "*.info"
+# 初始化并映射
+dotnet run --project TiaCC.Cli -- init --db ../../impact_map.db
+dotnet run --project TiaCC.Cli -- map \
+  --db ../../impact_map.db \
+  --coverage ../../coverage.cobertura.xml \
+  --test AllTests
 ```
 
 ---
 
-## 🎯 场景 4: .NET/C# 项目
+## 🎯 场景 4: Java 项目
 
 ### 步骤
 
-#### 1️⃣ 安装 Coverlet
+#### 1️⃣ 配置 JaCoCo
 
-```bash
-dotnet add package coverlet.collector
+在 `pom.xml` 中添加:
+```xml
+<plugin>
+  <groupId>org.jacoco</groupId>
+  <artifactId>jacoco-maven-plugin</artifactId>
+  <version>0.8.11</version>
+  <executions>
+    <execution>
+      <goals>
+        <goal>prepare-agent</goal>
+      </goals>
+    </execution>
+    <execution>
+      <id>report</id>
+      <phase>test</phase>
+      <goals>
+        <goal>report</goal>
+      </goals>
+    </execution>
+  </executions>
+</plugin>
 ```
 
 #### 2️⃣ 运行测试并生成覆盖率
 
 ```bash
-dotnet test \
-  --collect:"XPlat Code Coverage" \
-  --results-directory ./TestResults \
-  -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+mvn test
+# 生成 target/site/jacoco/jacoco.xml
 ```
 
-#### 3️⃣ 构建映射数据库
+#### 3️⃣ 转换 JaCoCo 为 Cobertura
 
 ```bash
-tia-mapper build \
-  --coverage-dir ./TestResults \
-  --db tiacc.db
+# 使用 cover2cover 或其他工具转换
+pip install cover2cover
+cover2cover target/site/jacoco/jacoco.xml src/main/java > coverage.cobertura.xml
+```
+
+#### 4️⃣ 构建映射数据库
+
+```bash
+cd TiaCC/tools-dotnet
+dotnet build -c Release
+
+dotnet run --project TiaCC.Cli -- init --db ../../impact_map.db
+dotnet run --project TiaCC.Cli -- map \
+  --db ../../impact_map.db \
+  --coverage ../../coverage.cobertura.xml \
+  --test AllTests
 ```
 
 ---
@@ -281,30 +319,40 @@ jobs:
         with:
           fetch-depth: 0  # 需要完整历史来做 diff
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: '20'
+          dotnet-version: '8.0.x'
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install TiaCC
-        run: npm install -g @tiacc/tools
+      - name: Build TiaCC
+        run: dotnet build tools-dotnet -c Release
 
       # Nightly: 构建映射数据库
+      - name: Run tests with coverage
+        if: github.ref == 'refs/heads/main'
+        run: |
+          dotnet test --collect:"XPlat Code Coverage" \
+            --results-directory ./coverage
+
       - name: Build impact map
         if: github.ref == 'refs/heads/main'
         run: |
-          npm run test:coverage
-          tia-mapper build -c ./coverage -d tiacc.db
+          dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+
+          for coverage_file in ./coverage/**/coverage.cobertura.xml; do
+            TEST_NAME=$(basename $(dirname "$coverage_file"))
+            dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+              --db impact_map.db \
+              --coverage "$coverage_file" \
+              --test "$TEST_NAME" || true
+          done
 
       - name: Upload impact map
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: tiacc-db
-          path: tiacc.db
+          path: impact_map.db
 
       # PR: 智能测试选择
       - name: Download impact map
@@ -313,21 +361,30 @@ jobs:
         with:
           workflow: tiacc.yml
           name: tiacc-db
+        continue-on-error: true
 
       - name: Get affected tests
         if: github.event_name == 'pull_request'
+        id: tiacc
         run: |
-          tia-recommend --db tiacc.db --branch origin/${{ github.base_ref }} \
-            --output affected_tests.txt
+          if [ -f impact_map.db ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }})
+            AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+              --db impact_map.db \
+              --files $CHANGED 2>/dev/null || echo "")
+            echo "affected=$AFFECTED" >> $GITHUB_OUTPUT
+          fi
 
-          if [ -s affected_tests.txt ]; then
-            echo "Running only affected tests:"
-            cat affected_tests.txt
-            # 根据您的测试框架运行指定的测试
-            npm test -- $(cat affected_tests.txt)
+      - name: Run tests
+        run: |
+          if [ -n "${{ steps.tiacc.outputs.affected }}" ]; then
+            echo "Running affected tests:"
+            echo "${{ steps.tiacc.outputs.affected }}"
+            FILTER=$(echo "${{ steps.tiacc.outputs.affected }}" | tr '\n' '|' | sed 's/|$//')
+            dotnet test --filter "FullyQualifiedName~$FILTER"
           else
             echo "Running all tests"
-            npm test
+            dotnet test
           fi
 ```
 
@@ -337,28 +394,28 @@ jobs:
 
 ### 传统方式
 ```
-PR #123: 修改了 src/calculator.ts
+PR #123: 修改了 src/Calculator.cs
 
 运行测试:
-✓ test_calculator.test.ts    (2.3s)
-✓ test_utils.test.ts          (1.8s)
-✓ test_database.test.ts       (5.2s)
-✓ test_api.test.ts            (4.1s)
-✓ test_auth.test.ts           (3.6s)
+✓ CalculatorTests     (2.3s)
+✓ UtilsTests          (1.8s)
+✓ DatabaseTests       (5.2s)
+✓ ApiTests            (4.1s)
+✓ AuthTests           (3.6s)
 
 总耗时: 17 秒
 ```
 
 ### 使用 TiaCC
 ```
-PR #123: 修改了 src/calculator.ts
+PR #123: 修改了 src/Calculator.cs
 
 🎯 TiaCC 分析:
-  检测到变更: src/calculator.ts
-  推荐测试: test_calculator.test.ts
+  检测到变更: src/Calculator.cs
+  推荐测试: CalculatorTests
 
 运行测试:
-✓ test_calculator.test.ts    (2.3s)
+✓ CalculatorTests     (2.3s)
 
 总耗时: 2.3 秒 ⚡️ (节省 86%)
 ```
@@ -371,9 +428,11 @@ PR #123: 修改了 src/calculator.ts
 
 ```bash
 # 导出数据
-tia-mapper export --db tiacc.db --output dashboard-data.json
+dotnet run --project tools-dotnet/TiaCC.Cli -- export \
+  --db impact_map.db \
+  --output ./dashboard/data
 
-# 启动 dashboard (如果克隆了 TiaCC 仓库)
+# 启动 dashboard
 cd TiaCC/dashboard
 python -m http.server 8080
 ```
@@ -381,25 +440,26 @@ python -m http.server 8080
 ### 查询特定文件的测试覆盖
 
 ```bash
-tia-mapper query src/calculator.ts --db tiacc.db
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files src/Calculator.cs
 
 # 输出:
-# Tests covering src/calculator.ts:
-#   - test_calculator.test.ts
-#   - test_integration.test.ts
+# Tests covering src/Calculator.cs:
+#   - CalculatorTests
+#   - IntegrationTests
 ```
 
 ### 数据库统计
 
 ```bash
-tia-mapper stats --db tiacc.db
+dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 
 # 输出:
 # 📊 Database Statistics:
 #   Total source files: 45
 #   Total tests: 120
-#   Average tests per file: 2.7
-#   Files with no coverage: 3
+#   Total mappings: 892
 ```
 
 ---
@@ -408,9 +468,8 @@ tia-mapper stats --db tiacc.db
 
 1. **Nightly 构建**: 每天或每周在主分支重新构建映射数据库
 2. **PR 验证**: 在 PR 中使用 TiaCC 推荐但不强制，仍然定期运行全量测试
-3. **增量更新**: 使用 `tia-mapper update` 而不是每次完全重建
-4. **缓存数据库**: 在 CI 中缓存映射数据库以加快速度
-5. **监控准确性**: 定期验证 TiaCC 的推荐是否准确
+3. **缓存数据库**: 在 CI 中缓存映射数据库以加快速度
+4. **监控准确性**: 定期验证 TiaCC 的推荐是否准确
 
 ---
 
@@ -423,10 +482,10 @@ A: TiaCC 基于代码覆盖率分析，如果测试之间有间接依赖，可�
 A: 是的！TiaCC 主要用于单元测试和集成测试。对于 E2E 测试，由于覆盖范围广，推荐效果可能不明显。
 
 **Q: 数据库多久需要重建？**
-A: 建议每次主分支更新后重建，或者使用 `update` 命令增量更新。
+A: 建议每次主分支更新后重建。
 
 **Q: 可以在本地开发中使用吗？**
-A: 当然！在本地修改代码后，运行 `tia-recommend` 查看需要运行哪些测试。
+A: 当然！在本地修改代码后，运行 query 命令查看需要运行哪些测试。
 
 ---
 
@@ -434,8 +493,7 @@ A: 当然！在本地修改代码后，运行 `tia-recommend` 查看需要运行
 
 - [完整文档](https://github.com/your-org/TiaCC/tree/main/docs)
 - [CI 模板](https://github.com/your-org/TiaCC/tree/main/ci-templates)
-- [示例项目](https://github.com/your-org/TiaCC/tree/main/examples)
-- [Dogfooding 案例](https://github.com/your-org/TiaCC/tree/main/tools-node/docs/DOGFOODING.md)
+- [Dashboard 可视化](../dashboard/README.md)
 
 ---
 

@@ -28,9 +28,8 @@
 
 ### 前置条件
 
-- Node.js 18+
+- .NET SDK 8.0+
 - Clang 14+ (C++ 覆盖率)
-- .NET SDK 6+ (C# 覆盖率)
 - CMake 3.20+
 
 ### 安装步骤
@@ -40,12 +39,12 @@
 git clone https://github.com/your-org/TiaCC.git
 cd TiaCC
 
-# 安装 tools-node 依赖
-cd tools-node
-npm install
+# 构建 tools-dotnet
+cd tools-dotnet
+dotnet build
 
 # 运行测试
-npm test
+dotnet test
 ```
 
 ### 运行端到端测试
@@ -58,27 +57,21 @@ run_e2e_test.cmd
 
 ## 代码规范
 
-### TypeScript (tools-node)
+### C#
 
-- 使用 ESLint 和 Prettier
-- 遵循 TypeScript 严格模式
-- 所有公共 API 需要 JSDoc 注释
+- 使用 EditorConfig
+- 遵循 .NET 编码规范
+- 所有公共 API 需要 XML 注释
 
 ```bash
-cd tools-node
-npm run lint
-npm run format
+cd tools-dotnet
+dotnet format
 ```
 
 ### C++
 
 - 使用 clang-format
 - 遵循项目 .clang-format 配置
-
-### C#
-
-- 使用 EditorConfig
-- 遵循 .NET 编码规范
 
 ## 提交信息格式
 
@@ -118,40 +111,37 @@ TiaCC/
 ├── src/                      # 源代码
 │   ├── cpp/                  # C++ 覆盖率模块
 │   └── dotnet/               # .NET 覆盖率模块
-├── tools-node/               # CLI 工具 (TypeScript)
+├── tools-dotnet/             # CLI 工具 (.NET)
 ├── clients/                  # 测试框架客户端
 ├── tests/
 │   └── e2e/                  # 端到端测试
 ├── docs/                     # 文档
-└── example/                  # 示例项目
+└── dashboard/                # Web 可视化 Dashboard
 ```
 
 ## 添加新功能
 
 ### 添加新的覆盖率格式
 
-1. 在 `tools-node/src/coverage-parser.ts` 中创建新的解析器类
-2. 继承 `CoverageParser` 基类
-3. 实现 `parse()` 方法
-4. 在 `mapper.ts` 中注册新格式
-5. 添加单元测试
+1. 在 `tools-dotnet/TiaCC.Core/Services/CoverageParser.cs` 中创建新的解析器方法
+2. 实现解析逻辑
+3. 在 CLI 中注册新格式
+4. 添加单元测试
 
-```typescript
-export class NewFormatParser extends CoverageParser {
-  getFileExtension(): string {
-    return '.new-format';
-  }
-
-  async parse(coverageFile: string): Promise<CoverageData | null> {
-    // 实现解析逻辑
-  }
+```csharp
+public class NewFormatParser
+{
+    public CoverageData Parse(string coverageFile)
+    {
+        // 实现解析逻辑
+    }
 }
 ```
 
 ### 添加新的测试框架客户端
 
 1. 在 `clients/` 目录创建新语言的客户端
-2. 实现 JSON-RPC 通信接口
+2. 实现覆盖率收集接口
 3. 提供 `beforeTest/afterTest` 钩子
 4. 添加使用文档
 

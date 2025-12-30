@@ -2,21 +2,20 @@
 
 This directory contains test framework hook implementations for multiple programming languages. These hooks enable TiaCC to collect coverage data during test execution.
 
-## 📋 Overview
+## Overview
 
-Hooks are code snippets that you integrate into your test framework (Jest, pytest, go test, etc.) to capture which code is executed during each test. This data is used by TiaCC to build the test-to-code impact mapping.
+Hooks are code snippets that you integrate into your test framework (pytest, go test, etc.) to capture which code is executed during each test. This data is used by TiaCC to build the test-to-code impact mapping.
 
-## 🗂️ Available Hooks
+## Available Hooks
 
 | Language | File | Test Frameworks |
 |----------|------|-----------------|
-| **TypeScript/JavaScript** | `tia_hooks.ts` | Jest, Mocha, Vitest |
+| **C#/.NET** | `TiaHooks.cs` | xUnit, NUnit, MSTest |
 | **Python** | `tia_hooks.py` | pytest, unittest |
 | **Go** | `tia_hooks.go` | go test |
 | **Lua** | `tia_hooks.lua` | busted, luaunit |
-| **C#/.NET** | `TiaHooks.cs` | xUnit, NUnit, MSTest |
 
-## 🚀 How to Use
+## How to Use
 
 ### 1. Choose Your Hook File
 
@@ -26,39 +25,47 @@ Select the hook file that matches your programming language.
 
 Each hook file contains detailed integration instructions in the comments at the top of the file.
 
-**Example for TypeScript/Jest:**
+**Example for C#/xUnit:**
 
-```typescript
-// In your jest.config.js or test setup file
-import { TiaHooks } from './clients/tia_hooks.ts';
+```csharp
+// In your test project
+using TiaCC.Hooks;
 
-// Initialize hooks
-beforeAll(() => {
-  TiaHooks.initialize();
-});
+public class MyTests : IDisposable
+{
+    private readonly TiaHooks _hooks;
 
-// Capture coverage per test
-beforeEach((testInfo) => {
-  TiaHooks.beforeTest(testInfo.name);
-});
+    public MyTests()
+    {
+        _hooks = new TiaHooks();
+        _hooks.BeforeTest(nameof(MyTests));
+    }
 
-afterEach((testInfo) => {
-  TiaHooks.afterTest(testInfo.name);
-});
+    public void Dispose()
+    {
+        _hooks.AfterTest(nameof(MyTests));
+    }
+
+    [Fact]
+    public void MyTest()
+    {
+        // Your test code
+    }
+}
 ```
 
 ### 3. Configure Coverage Output
 
 The hooks will generate coverage data files that TiaCC uses to build the impact mapping. Make sure to configure the output directory in your TiaCC configuration file (`tia_config.json`).
 
-## 📖 How Hooks Work
+## How Hooks Work
 
 1. **Before Each Test**: Hook records the test name and starts coverage collection
 2. **During Test Execution**: Framework's native coverage collector tracks executed code
 3. **After Each Test**: Hook saves coverage data with test name mapping
 4. **TiaCC Processing**: TiaCC reads coverage files to build test-to-code relationships
 
-## 🔧 Customization
+## Customization
 
 Each hook file can be customized for your specific needs:
 
@@ -67,7 +74,7 @@ Each hook file can be customized for your specific needs:
 - **Test name formatting**: Modify how test names are captured and stored
 - **Filtering**: Add logic to exclude certain files or paths
 
-## 📚 Documentation
+## Documentation
 
 For detailed integration guides and examples:
 
@@ -75,14 +82,14 @@ For detailed integration guides and examples:
 - [Language-Specific Examples](../docs/language-specific-examples.md)
 - [CI/CD Integration](../docs/ci-cd-integration.md)
 
-## 💡 Tips
+## Tips
 
 - **Copy, don't symlink**: Copy the hook file into your project for easier customization
 - **Version control**: Commit the hook file with your project
 - **Test the hooks**: Run a few tests manually to verify coverage is being captured
 - **Check output**: Ensure coverage files are created in the expected location
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 **Coverage files not being created?**
 - Verify the output directory exists and is writable
@@ -94,6 +101,6 @@ For detailed integration guides and examples:
 - Check that test names in coverage files match your test file structure
 - Verify the path mappings in `tia_config.json`
 
-## 🤝 Contributing
+## Contributing
 
 Found a bug or want to add support for a new test framework? See [CONTRIBUTING.md](../CONTRIBUTING.md).
