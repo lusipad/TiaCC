@@ -33,7 +33,7 @@ echo "Discovering tests..."
 TEST_PROJECT="$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
 
 # Get list of test methods using dotnet test --list-tests
-TEST_LIST=$(dotnet test "$TEST_PROJECT" -c Release --list-tests --no-build 2>/dev/null | grep -E "^\s+\w+Tests\.\w+" || true)
+TEST_LIST=$(dotnet test "$TEST_PROJECT" -c Release --list-tests 2>/dev/null | grep -E "^\s+\w+Tests\.\w+" || true)
 
 if [ -z "$TEST_LIST" ]; then
     echo "No tests found. Running all tests to generate coverage..."
@@ -41,7 +41,6 @@ if [ -z "$TEST_LIST" ]; then
     # Run all tests with coverage
     dotnet test "$TEST_PROJECT" \
         -c Release \
-        --no-build \
         --collect:"XPlat Code Coverage" \
         --results-directory "$COVERAGE_DIR" \
         -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
@@ -71,7 +70,6 @@ else
         # Run test class with coverage
         dotnet test "$TEST_PROJECT" \
             -c Release \
-            --no-build \
             --filter "FullyQualifiedName~$TEST_CLASS" \
             --collect:"XPlat Code Coverage" \
             --results-directory "$COVERAGE_DIR/$TEST_CLASS" \
