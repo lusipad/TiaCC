@@ -160,6 +160,55 @@
             height: 200px;
             color: var(--text-muted);
         }
+
+        /* Treemap styles */
+        .treemap-cell {
+            cursor: pointer;
+            stroke: rgba(15, 23, 42, 0.8);
+            stroke-width: 1px;
+            transition: opacity 0.2s, stroke-width 0.2s;
+        }
+        .treemap-cell:hover {
+            stroke-width: 2px;
+            stroke: #fff;
+        }
+        .treemap-label {
+            pointer-events: none;
+            fill: #fff;
+            font-size: 11px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+        }
+        .treemap-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .treemap-breadcrumb-item {
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .treemap-breadcrumb-item:hover {
+            color: var(--primary);
+        }
+        .treemap-breadcrumb-item.active {
+            color: var(--text-main);
+        }
+        .treemap-legend {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .treemap-legend-gradient {
+            width: 120px;
+            height: 12px;
+            border-radius: 6px;
+            background: linear-gradient(to right, #ef4444, #f59e0b, #10b981);
+        }
     </style>
 </head>
 <body class="p-4 md:p-6">
@@ -229,6 +278,28 @@
             </section>
         </div>
 
+        <!-- Treemap Coverage View -->
+        <section class="glass-panel rounded-xl p-4">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold flex items-center gap-2">
+                    <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/>
+                    </svg>
+                    Treemap Coverage
+                    <span class="text-xs text-slate-400 ml-2">(Area = Code Size, Color = Coverage)</span>
+                </h2>
+                <div class="treemap-legend">
+                    <span>0%</span>
+                    <div class="treemap-legend-gradient"></div>
+                    <span>100%</span>
+                </div>
+            </div>
+            <div id="treemap-breadcrumb" class="treemap-breadcrumb">
+                <span class="treemap-breadcrumb-item active">Root</span>
+            </div>
+            <div id="treemap-container" class="h-80 rounded-lg overflow-hidden"></div>
+        </section>
+
         <!-- Expandable File Tree -->
         <section class="glass-panel rounded-xl p-4">
             <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -261,6 +332,9 @@
         let expandedDirs = new Set();
         let expandedFiles = new Set();
 
+        // Treemap state
+        let treemapPath = []; // Breadcrumb path for drill-down
+
         // Load data
         async function loadData() {
             try {
@@ -279,6 +353,7 @@
                 renderModuleTable();
                 renderFileTree();
                 renderModuleGraph();
+                renderTreemap();
             } catch (err) {
                 console.error('Failed to load data:', err);
             }
@@ -698,6 +773,252 @@
             }
         }
 
+        // Build hierarchical data for treemap
+        function buildTreemapData() {
+            const root = {
+                name: 'root',
+                children: []
+            };
+
+            // Group files by directory
+            const dirMap = new Map();
+
+            appData.mappings.forEach(m => {
+                const parts = m.sourceFile.split('/');
+                const dir = parts.length > 1 ? parts[0] : '.';
+                const fileName = parts[parts.length - 1];
+
+                if (!dirMap.has(dir)) {
+                    dirMap.set(dir, new Map());
+                }
+
+                const fileMap = dirMap.get(dir);
+                if (!fileMap.has(fileName)) {
+                    fileMap.set(fileName, {
+                        coverage: 0,
+                        lines: 0,
+                        tests: []
+                    });
+                }
+
+                const file = fileMap.get(fileName);
+                file.coverage = Math.max(file.coverage, m.lineCoveragePct);
+                file.tests.push(m.testScript);
+            });
+
+            // Add function line counts
+            appData.symbols.symbols.forEach(sym => {
+                const parts = sym.sourceFile.split('/');
+                const dir = parts.length > 1 ? parts[0] : '.';
+                const fileName = parts[parts.length - 1];
+
+                if (dirMap.has(dir)) {
+                    const fileMap = dirMap.get(dir);
+                    if (fileMap.has(fileName)) {
+                        const file = fileMap.get(fileName);
+                        file.lines += (sym.endLine - sym.startLine + 1);
+                    }
+                }
+            });
+
+            // Build tree structure
+            dirMap.forEach((files, dir) => {
+                const dirNode = {
+                    name: dir,
+                    children: []
+                };
+
+                files.forEach((data, fileName) => {
+                    // Ensure minimum size for visibility
+                    const size = Math.max(data.lines || 10, 10);
+
+                    dirNode.children.push({
+                        name: fileName,
+                        value: size,
+                        coverage: data.coverage,
+                        tests: data.tests,
+                        fullPath: `${dir}/${fileName}`
+                    });
+                });
+
+                // Calculate directory coverage
+                const totalCov = dirNode.children.reduce((sum, c) => sum + c.coverage, 0);
+                dirNode.coverage = totalCov / dirNode.children.length;
+
+                root.children.push(dirNode);
+            });
+
+            return root;
+        }
+
+        // Get treemap color with smooth gradient
+        function getTreemapColor(coverage) {
+            // Smooth gradient from red (0%) -> yellow (50%) -> green (100%)
+            if (coverage <= 50) {
+                const t = coverage / 50;
+                const r = 239;
+                const g = Math.round(68 + (158 - 68) * t);
+                const b = Math.round(68 + (11 - 68) * t);
+                return `rgb(${r}, ${g}, ${b})`;
+            } else {
+                const t = (coverage - 50) / 50;
+                const r = Math.round(245 - (245 - 16) * t);
+                const g = Math.round(158 + (185 - 158) * t);
+                const b = Math.round(11 + (129 - 11) * t);
+                return `rgb(${r}, ${g}, ${b})`;
+            }
+        }
+
+        // Render treemap
+        function renderTreemap(currentNode = null) {
+            const container = document.getElementById('treemap-container');
+            const breadcrumb = document.getElementById('treemap-breadcrumb');
+            const width = container.clientWidth;
+            const height = container.clientHeight || 320;
+
+            // Clear previous
+            container.innerHTML = '';
+
+            // Build data
+            const fullData = buildTreemapData();
+            const data = currentNode || fullData;
+
+            // Update breadcrumb
+            let breadcrumbHtml = `<span class="treemap-breadcrumb-item ${treemapPath.length === 0 ? 'active' : ''}"
+                                        onclick="treemapNavigate(-1)">Root</span>`;
+            treemapPath.forEach((name, i) => {
+                breadcrumbHtml += `
+                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                    <span class="treemap-breadcrumb-item ${i === treemapPath.length - 1 ? 'active' : ''}"
+                          onclick="treemapNavigate(${i})">${name}</span>
+                `;
+            });
+            breadcrumb.innerHTML = breadcrumbHtml;
+
+            if (!data.children || data.children.length === 0) {
+                container.innerHTML = '<div class="empty-state">No data available</div>';
+                return;
+            }
+
+            // Create treemap layout
+            const hierarchy = d3.hierarchy(data)
+                .sum(d => d.value || 0)
+                .sort((a, b) => b.value - a.value);
+
+            const treemap = d3.treemap()
+                .size([width, height])
+                .padding(2)
+                .round(true);
+
+            treemap(hierarchy);
+
+            // Create SVG
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            const tooltip = document.getElementById('tooltip');
+
+            // Draw cells
+            const cells = svg.selectAll('g')
+                .data(hierarchy.leaves())
+                .join('g')
+                .attr('transform', d => `translate(${d.x0},${d.y0})`);
+
+            // Rectangles
+            cells.append('rect')
+                .attr('class', 'treemap-cell')
+                .attr('width', d => d.x1 - d.x0)
+                .attr('height', d => d.y1 - d.y0)
+                .attr('fill', d => getTreemapColor(d.data.coverage || 0))
+                .attr('rx', 3)
+                .on('click', (event, d) => {
+                    // If this is a directory (has children in original data), drill down
+                    const originalNode = fullData.children.find(c => c.name === d.data.name);
+                    if (originalNode && originalNode.children) {
+                        treemapPath.push(d.data.name);
+                        renderTreemap(originalNode);
+                    } else if (d.data.fullPath) {
+                        // Navigate to file tree
+                        navigateToFile(d.data.fullPath);
+                    }
+                })
+                .on('mouseover', (event, d) => {
+                    const testsHtml = d.data.tests
+                        ? d.data.tests.slice(0, 3).map(t => `<span class="badge bg-slate-700 mr-1">${t}</span>`).join('')
+                        : '';
+
+                    tooltip.innerHTML = `
+                        <div class="font-semibold">${d.data.name}</div>
+                        <div class="text-slate-400 text-xs mt-1">
+                            ${d.data.value ? `Lines: ~${d.data.value}` : ''}<br>
+                            Coverage: <span style="color: ${getCoverageColor(d.data.coverage || 0)}">${(d.data.coverage || 0).toFixed(1)}%</span>
+                        </div>
+                        ${testsHtml ? `<div class="mt-2">${testsHtml}</div>` : ''}
+                        <div class="text-slate-500 text-xs mt-1">Click to ${d.data.children ? 'expand' : 'view details'}</div>
+                    `;
+                    tooltip.classList.remove('hidden');
+                    tooltip.style.left = (event.pageX + 10) + 'px';
+                    tooltip.style.top = (event.pageY - 10) + 'px';
+                })
+                .on('mousemove', (event) => {
+                    tooltip.style.left = (event.pageX + 10) + 'px';
+                    tooltip.style.top = (event.pageY - 10) + 'px';
+                })
+                .on('mouseout', () => {
+                    tooltip.classList.add('hidden');
+                });
+
+            // Labels (only if cell is large enough)
+            cells.append('text')
+                .attr('class', 'treemap-label')
+                .attr('x', 4)
+                .attr('y', 14)
+                .text(d => {
+                    const width = d.x1 - d.x0;
+                    const height = d.y1 - d.y0;
+                    if (width < 40 || height < 20) return '';
+                    const maxChars = Math.floor(width / 7);
+                    return d.data.name.length > maxChars
+                        ? d.data.name.slice(0, maxChars - 2) + '..'
+                        : d.data.name;
+                });
+
+            // Coverage percentage (only if cell is large enough)
+            cells.append('text')
+                .attr('class', 'treemap-label')
+                .attr('x', 4)
+                .attr('y', 28)
+                .attr('font-size', '10px')
+                .attr('opacity', 0.8)
+                .text(d => {
+                    const width = d.x1 - d.x0;
+                    const height = d.y1 - d.y0;
+                    if (width < 35 || height < 35) return '';
+                    return `${(d.data.coverage || 0).toFixed(0)}%`;
+                });
+        }
+
+        // Treemap navigation
+        function treemapNavigate(index) {
+            if (index < 0) {
+                treemapPath = [];
+                renderTreemap();
+            } else {
+                treemapPath = treemapPath.slice(0, index + 1);
+                const fullData = buildTreemapData();
+                let node = fullData;
+                for (const name of treemapPath) {
+                    node = node.children.find(c => c.name === name);
+                    if (!node) break;
+                }
+                renderTreemap(node);
+            }
+        }
+
         // Search functionality
         function performSearch(query) {
             const resultsContainer = document.getElementById('search-results');
@@ -838,9 +1159,14 @@
                 });
             });
 
-            // Resize handler for graph
+            // Resize handler for graph and treemap
+            let resizeTimeout;
             window.addEventListener('resize', () => {
-                renderModuleGraph();
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(() => {
+                    renderModuleGraph();
+                    renderTreemap();
+                }, 100);
             });
         });
     </script>
