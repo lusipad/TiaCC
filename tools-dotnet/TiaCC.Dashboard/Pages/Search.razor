@@ -1,0 +1,118 @@
+@page "/search"
+@inject CoverageDataService DataService
+
+<PageTitle>TiaCC Dashboard - Search</PageTitle>
+
+<div class="card">
+    <h2 class="card-title">Search Files</h2>
+
+    <div class="search-container">
+        <input type="text"
+               class="search-input"
+               placeholder="Search for files by name or path..."
+               @bind="_searchQuery"
+               @bind:event="oninput"
+               @onkeyup="OnSearchKeyUp" />
+    </div>
+
+    @if (_searchResults.Count > 0)
+    {
+        <p style="margin-bottom: 1rem; color: var(--text-muted);">
+            Found @_searchResults.Count file(s) matching "@_searchQuery"
+        </p>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>File</th>
+                        <th>Path</th>
+                        <th>Tests</th>
+                        <th>Coverage</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var file in _searchResults)
+                    {
+                        <tr>
+                            <td><strong>@file.FileName</strong></td>
+                            <td style="color: var(--text-muted); font-size: 0.875rem;">@file.FullPath</td>
+                            <td>
+                                @foreach (var test in file.Tests.Take(3))
+                                {
+                                    <span class="tag">@test</span>
+                                }
+                                @if (file.Tests.Count > 3)
+                                {
+                                    <span class="tag">+@(file.Tests.Count - 3) more</span>
+                                }
+                            </td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <div class="coverage-bar">
+                                        <div class="coverage-fill @GetCoverageClass(file.Coverage)"
+                                             style="width: @file.Coverage%"></div>
+                                    </div>
+                                    <span>@file.Coverage.ToString("F1")%</span>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(_searchQuery))
+    {
+        <p style="color: var(--text-muted); text-align: center; padding: 2rem;">
+            No files found matching "@_searchQuery"
+        </p>
+    }
+    else
+    {
+        <p style="color: var(--text-muted); text-align: center; padding: 2rem;">
+            Enter a search term to find files
+        </p>
+    }
+</div>
+
+@code {
+    private string _searchQuery = "";
+    private List<FileCoverage> _searchResults = [];
+    private System.Threading.Timer? _debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await DataService.LoadDataAsync();
+    }
+
+    private void OnSearchKeyUp(KeyboardEventArgs e)
+    {
+        _debounceTimer?.Dispose();
+        _debounceTimer = new System.Threading.Timer(_ =>
+        {
+            InvokeAsync(() =>
+            {
+                PerformSearch();
+                StateHasChanged();
+            });
+        }, null, 300, Timeout.Infinite);
+    }
+
+    private void PerformSearch()
+    {
+        _searchResults = DataService.Search(_searchQuery);
+    }
+
+    private static string GetCoverageClass(double coverage) => coverage switch
+    {
+        >= 80 => "coverage-high",
+        >= 50 => "coverage-medium",
+        _ => "coverage-low"
+    };
+
+    public void Dispose()
+    {
+        _debounceTimer?.Dispose();
+    }
+}

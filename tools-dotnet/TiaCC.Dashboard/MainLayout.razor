@@ -1,0 +1,21 @@
+@inherits LayoutComponentBase
+
+<div class="app-container">
+    <header class="app-header">
+        <h1>TiaCC Coverage Dashboard</h1>
+        <nav>
+            <NavLink href="" Match="NavLinkMatch.All">Overview</NavLink>
+            <NavLink href="treemap">Treemap</NavLink>
+            <NavLink href="files">Files</NavLink>
+            <NavLink href="search">Search</NavLink>
+        </nav>
+    </header>
+
+    <main class="app-main">
+        @Body
+    </main>
+
+    <footer class="app-footer">
+        <p>TiaCC - Test Impact Analysis for C/C++</p>
+    </footer>
+</div>

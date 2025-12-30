@@ -1,6 +1,6 @@
-# TiaCC .NET CLI Tool
+# TiaCC .NET Tools
 
-.NET 10 implementation of the TiaCC (Test Impact Analysis for C/C++) command-line tool.
+.NET 10 implementation of TiaCC (Test Impact Analysis for C/C++) including CLI tool and web dashboard.
 
 ## Requirements
 
@@ -76,8 +76,40 @@ tools-dotnet/
 │   ├── Data/              # EF Core DbContext
 │   ├── Models/            # Entity models
 │   └── Services/          # Business logic
-└── TiaCC.Cli/             # CLI application
-    └── Program.cs         # Command definitions
+├── TiaCC.Cli/             # CLI application
+│   └── Program.cs         # Command definitions
+└── TiaCC.Dashboard/       # Blazor WebAssembly dashboard
+    ├── Pages/             # Razor pages
+    ├── Components/        # Reusable components
+    ├── Services/          # Data services
+    └── wwwroot/           # Static assets
+```
+
+## Dashboard
+
+The dashboard is a Blazor WebAssembly application that provides interactive coverage visualization.
+
+### Features
+
+- **Overview**: Module-level coverage statistics with expandable file details
+- **Treemap**: Hierarchical coverage visualization with drill-down navigation
+- **File Explorer**: Browse files in a tree structure with coverage indicators
+- **Search**: Find files by name or path with coverage details
+
+### Run Dashboard
+
+```bash
+cd TiaCC.Dashboard
+dotnet run
+```
+
+Then open http://localhost:5000 in your browser.
+
+### Deploy as Static Site
+
+```bash
+dotnet publish TiaCC.Dashboard -c Release -o ./publish
+# Copy publish/wwwroot/* to any static hosting (GitHub Pages, Netlify, etc.)
 ```
 
 ## Database Schema
@@ -96,4 +128,13 @@ This .NET implementation is compatible with:
 
 - Existing `impact_map.db` databases created by the Node.js version
 - Dashboard JSON export format (same structure)
-- Coverage formats: LLVM JSON, Cobertura XML, LCOV
+- Coverage formats:
+  - LLVM (profraw, profdata, JSON export)
+  - Coverlet JSON
+  - Cobertura XML
+  - LCOV
+  - JaCoCo XML
+  - Istanbul/NYC JSON
+  - coverage.py JSON
+  - dotCover JSON
+  - LuaCov

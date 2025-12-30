@@ -1,0 +1,140 @@
+@page "/treemap"
+@inject CoverageDataService DataService
+@inject IJSRuntime JS
+
+<PageTitle>TiaCC Dashboard - Treemap</PageTitle>
+
+<div class="card">
+    <h2 class="card-title">Coverage Treemap</h2>
+    <p style="color: var(--text-muted); margin-bottom: 1rem;">
+        Click on directories to drill down. Size = file count, Color = coverage level.
+    </p>
+
+    <div class="treemap-breadcrumb">
+        @foreach (var (path, index) in _breadcrumb.Select((p, i) => (p, i)))
+        {
+            <button @onclick="() => NavigateTo(index)">
+                @(string.IsNullOrEmpty(path) ? "root" : path.Split('/').Last())
+            </button>
+            @if (index < _breadcrumb.Count - 1)
+            {
+                <span style="color: var(--text-muted);">/</span>
+            }
+        }
+    </div>
+
+    <div id="treemap-container" class="treemap-container" @ref="_treemapContainer"></div>
+
+    @if (_selectedNode != null)
+    {
+        <div style="margin-top: 1rem; padding: 1rem; background: var(--bg-color); border-radius: 0.5rem;">
+            <strong>@_selectedNode.Name</strong>
+            <span style="color: var(--text-muted); margin-left: 1rem;">
+                @(_selectedNode.IsDirectory ? $"{_selectedNode.Children.Count} items" : "File")
+            </span>
+            <span style="margin-left: 1rem;">
+                Coverage: <strong class="@GetCoverageTextClass(_selectedNode.Coverage)">
+                    @_selectedNode.Coverage.ToString("F1")%
+                </strong>
+            </span>
+        </div>
+    }
+</div>
+
+@code {
+    private ElementReference _treemapContainer;
+    private TreemapNode _rootNode = new();
+    private TreemapNode? _currentNode;
+    private TreemapNode? _selectedNode;
+    private List<string> _breadcrumb = [""];
+    private bool _jsInitialized;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await DataService.LoadDataAsync();
+        _rootNode = DataService.BuildTreemap();
+        _currentNode = _rootNode;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender || !_jsInitialized)
+        {
+            _jsInitialized = true;
+            await RenderTreemap();
+        }
+    }
+
+    private async Task RenderTreemap()
+    {
+        if (_currentNode == null) return;
+        await JS.InvokeVoidAsync("renderTreemap", _treemapContainer, SerializeNode(_currentNode));
+    }
+
+    private object SerializeNode(TreemapNode node) => new
+    {
+        name = node.Name,
+        fullPath = node.FullPath,
+        value = node.Value,
+        coverage = node.Coverage,
+        isDirectory = node.IsDirectory,
+        children = node.Children.Select(SerializeNode).ToArray()
+    };
+
+    private async Task NavigateTo(int breadcrumbIndex)
+    {
+        var path = _breadcrumb[breadcrumbIndex];
+        _breadcrumb = _breadcrumb.Take(breadcrumbIndex + 1).ToList();
+
+        if (string.IsNullOrEmpty(path))
+        {
+            _currentNode = _rootNode;
+        }
+        else
+        {
+            _currentNode = FindNode(_rootNode, path);
+        }
+
+        _selectedNode = null;
+        await RenderTreemap();
+    }
+
+    [JSInvokable]
+    public async Task OnTreemapNodeClick(string fullPath, bool isDirectory)
+    {
+        if (isDirectory)
+        {
+            var node = FindNode(_rootNode, fullPath);
+            if (node != null && node.Children.Count > 0)
+            {
+                _currentNode = node;
+                _breadcrumb.Add(fullPath);
+                await RenderTreemap();
+                StateHasChanged();
+            }
+        }
+        else
+        {
+            _selectedNode = FindNode(_rootNode, fullPath);
+            StateHasChanged();
+        }
+    }
+
+    private TreemapNode? FindNode(TreemapNode root, string fullPath)
+    {
+        if (root.FullPath == fullPath) return root;
+        foreach (var child in root.Children)
+        {
+            var found = FindNode(child, fullPath);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static string GetCoverageTextClass(double coverage) => coverage switch
+    {
+        >= 80 => "coverage-high",
+        >= 50 => "coverage-medium",
+        _ => "coverage-low"
+    };
+}

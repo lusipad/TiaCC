@@ -1,0 +1,39 @@
+@page "/files"
+@inject CoverageDataService DataService
+
+<PageTitle>TiaCC Dashboard - Files</PageTitle>
+
+<div class="card">
+    <h2 class="card-title">File Explorer</h2>
+    <p style="color: var(--text-muted); margin-bottom: 1rem;">
+        Browse all source files and their coverage information.
+    </p>
+
+    @if (_loading)
+    {
+        <div class="loading">
+            <div class="spinner"></div>
+        </div>
+    }
+    else
+    {
+        <div class="file-tree">
+            @foreach (var child in _root.Children)
+            {
+                <FileTreeNodeComponent Node="child" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private FileTreeNode _root = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await DataService.LoadDataAsync();
+        _root = DataService.BuildFileTree();
+        _loading = false;
+    }
+}
