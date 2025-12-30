@@ -6,31 +6,31 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 
-### 🎯 Run Only Affected Tests, Make CI Lightning Fast
+### Run Only Affected Tests, Make CI Lightning Fast
 
 **Reduce 30-minute full test runs to 5 minutes**
 
-[🚀 Quick Start](#-quick-start) •
-[📖 How It Works](#-how-it-works) •
-[📊 Dashboard](#-interactive-dashboard) •
-[📚 Docs](docs/architecture.md)
+[Quick Start](#-quick-start) |
+[How It Works](#-how-it-works) |
+[Dashboard](#-interactive-dashboard) |
+[Docs](docs/architecture.md)
 
-[🇨🇳 中文版](README.md)
+[Chinese Version](README.md)
 
 </div>
 
 ---
 
-## 😫 Sound Familiar?
+## Sound Familiar?
 
 | Pain Point | Description |
 |------------|-------------|
-| ⏰ **Slow CI** | Every commit waits 30+ minutes for full test suite |
-| 💸 **Wasted Resources** | Changed one line, runs thousands of unrelated tests |
-| 😴 **Slow Feedback** | Submit PR, grab coffee, still waiting... |
-| 🔄 **Redundant Work** | Passed locally, CI runs everything again |
+| **Slow CI** | Every commit waits 30+ minutes for full test suite |
+| **Wasted Resources** | Changed one line, runs thousands of unrelated tests |
+| **Slow Feedback** | Submit PR, grab coffee, still waiting... |
+| **Redundant Work** | Passed locally, CI runs everything again |
 
-## ✨ How TiaCC Solves This
+## How TiaCC Solves This
 
 <div align="center">
 
@@ -46,34 +46,34 @@
 │            ↓                           cover this file?                 │
 │     Wait 30 minutes                           ↓                         │
 │            ↓                           Recommend only 2 relevant tests  │
-│     😴                                        ↓                         │
-│                                        ✅ Done in 3 minutes!            │
+│     ...                                       ↓                         │
+│                                        Done in 3 minutes!               │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 </div>
 
-### 🔍 Core Principle
+### Core Principle
 
 TiaCC builds source-to-test mappings through **code coverage analysis**:
 
 ```
-1️⃣ Nightly Build: Run full test suite, record which tests cover which files
+1. Nightly Build: Run full test suite, record which tests cover which files
                    ↓
-2️⃣ Generate Mapping DB: calculator.cpp ← test_calc_basic, test_calc_advanced
+2. Generate Mapping DB: calculator.cpp ← test_calc_basic, test_calc_advanced
                          statistics.cpp  ← test_statistics
                    ↓
-3️⃣ PR Submission: Detect which files you changed
+3. PR Submission: Detect which files you changed
                    ↓
-4️⃣ Smart Recommendation: Run only affected tests!
+4. Smart Recommendation: Run only affected tests!
 ```
 
-## 📊 Interactive Dashboard
+## Interactive Dashboard
 
 TiaCC provides a beautiful Web Dashboard to **visualize** code-test relationships:
 
-### 🌐 Dependency Graph
+### Dependency Graph
 
 Intuitive view of source files (blue) and tests (green) relationships:
 
@@ -81,7 +81,7 @@ Intuitive view of source files (blue) and tests (green) relationships:
 <img src="docs/images/dashboard_main.png" alt="Dashboard Main View" width="800">
 </div>
 
-### 📁 Smart File Management
+### Smart File Management
 
 Folder grouping with aggregate coverage, clear at a glance:
 
@@ -89,7 +89,7 @@ Folder grouping with aggregate coverage, clear at a glance:
 <img src="docs/images/dashboard_folders.png" alt="Folder View" width="800">
 </div>
 
-### 🔬 Function-Level Analysis
+### Function-Level Analysis
 
 Click any source file to see function-level coverage details:
 
@@ -97,7 +97,7 @@ Click any source file to see function-level coverage details:
 <img src="docs/images/dashboard_detail.png" alt="Detail Panel" width="800">
 </div>
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 30-Second Dashboard Demo
 
@@ -111,45 +111,53 @@ cd dashboard
 python -m http.server 8080
 
 # 3. Open browser
-# http://localhost:8080/dashboard/
+# http://localhost:8080/
 ```
 
 ### Using in Your Project
 
-#### Step 1: Nightly - Build Mapping Database
+#### Step 1: Install TiaCC CLI
 
 ```bash
-# 1. Build with Clang (enable coverage)
-clang++ -fprofile-instr-generate -fcoverage-mapping -o app src/*.cpp
+# Ensure .NET 8.0+ is installed
+dotnet --version
 
-# 2. Run full test suite (each test generates .profraw file)
-./run_all_tests.sh
-
-# 3. Build mapping database
-cd tools-node && npm install
-npx tsx src/cli/mapper.ts build \
-  --coverage-dir ../coverage_data \
-  --db ../impact_map.db
+# Build TiaCC CLI
+cd tools-dotnet
+dotnet build -c Release
 ```
 
-#### Step 2: PR Time - Get Recommended Tests
+#### Step 2: Nightly - Build Mapping Database
 
 ```bash
-# Get affected tests
-npx tsx src/cli/recommend.ts \
+# 1. Run tests with coverage collection
+dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage
+
+# 2. Initialize database
+dotnet run --project TiaCC.Cli -- init --db impact_map.db
+
+# 3. Map coverage data
+dotnet run --project TiaCC.Cli -- map \
   --db impact_map.db \
-  --branch origin/main
+  --coverage ./coverage/*/coverage.cobertura.xml \
+  --test MyTestClass
+```
+
+#### Step 3: PR Time - Get Recommended Tests
+
+```bash
+# Query affected tests
+dotnet run --project TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files src/MyService.cs
 
 # Example output:
-# Detected changes: calculator.cpp
-# Recommended tests:
-#   ✓ test_calculator_basic
-#   ✓ test_calculator_advanced
-# 
-# Saved 998 tests!
+# Affected tests:
+#   - MyServiceTests
+#   - IntegrationTests
 ```
 
-## 📈 Results Comparison
+## Results Comparison
 
 | Metric | Traditional | With TiaCC |
 |--------|-------------|------------|
@@ -158,21 +166,23 @@ npx tsx src/cli/recommend.ts \
 | Developer Feedback | 30 min after commit | **3 min after commit** |
 | Compute Resources | 100% | **5-10%** |
 
-## 🎯 Typical Use Cases
+## Typical Use Cases
 
 ### Use Case 1: Daily Development
 
 ```bash
-# Modified calculator.cpp
+# Modified MathService.cs
 git diff --name-only
-# → src/calculator.cpp
+# → src/MathService.cs
 
 # Query affected tests
-npx tsx src/cli/mapper.ts query calculator.cpp --db impact_map.db
-# → test_calculator_basic, test_calculator_advanced
+dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+  --db impact_map.db \
+  --files src/MathService.cs
+# → MathServiceTests
 
-# Run only these 2 tests
-./run_test test_calculator_basic test_calculator_advanced
+# Run only this test
+dotnet test --filter "FullyQualifiedName~MathServiceTests"
 ```
 
 ### Use Case 2: CI/CD Integration
@@ -181,12 +191,15 @@ npx tsx src/cli/mapper.ts query calculator.cpp --db impact_map.db
 # .github/workflows/pr.yml
 - name: Get affected tests
   run: |
-    npx tsx tools-node/src/cli/recommend.ts \
+    dotnet run --project tools-dotnet/TiaCC.Cli -- query \
       --db impact_map.db \
-      --output affected_tests.txt
-    
+      --files $(git diff --name-only origin/main) \
+      > affected_tests.txt
+
 - name: Run affected tests
-  run: cat affected_tests.txt | xargs ./run_test
+  run: |
+    FILTER=$(cat affected_tests.txt | tr '\n' '|' | sed 's/|$//')
+    dotnet test --filter "FullyQualifiedName~$FILTER"
 ```
 
 ### Use Case 3: Dashboard Analysis
@@ -195,31 +208,31 @@ npx tsx src/cli/mapper.ts query calculator.cpp --db impact_map.db
 2. **Function-Level Targeting** - Find low-coverage functions
 3. **Impact Analysis** - See which tests a file change affects
 
-## 🏗️ Supported Tech Stack
+## Supported Tech Stack
 
 | Type | Support |
 |------|---------|
-| **Languages** | C++ (LLVM), C# (Coverlet/.NET), Java (JaCoCo), Python (coverage.py), JavaScript/TypeScript (Istanbul/nyc), Lua (LuaCov) |
-| **Coverage Formats** | LLVM Profile, Coverlet, Cobertura, OpenCppCoverage, LCOV/gcov, JaCoCo, Istanbul, dotCover, LuaCov |
-| **Test Frameworks** | Lua, Python, C#, TypeScript, Go, Java, and any framework supporting standard coverage formats |
+| **Languages** | C++ (LLVM), C# (Coverlet/.NET), Java (JaCoCo), Python (coverage.py), Lua (LuaCov) |
+| **Coverage Formats** | LLVM Profile, Coverlet, Cobertura, OpenCppCoverage, LCOV/gcov, JaCoCo, dotCover, LuaCov |
+| **Test Frameworks** | xUnit, NUnit, MSTest, pytest, go test, busted, and more |
 | **Platforms** | Windows, Linux, macOS |
 | **Analysis Level** | File-level, Function-level |
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 TiaCC/
-├── dashboard/           # 📊 Web visualization Dashboard
-├── tools-node/          # 🛠️ CLI tools (mapper, recommend)
-├── clients/             # 🔌 Multi-language test framework clients
+├── dashboard/           # Web visualization Dashboard
+├── tools-dotnet/        # .NET CLI tools (mapper, recommend)
+├── clients/             # Multi-language test framework clients
 ├── src/
 │   ├── cpp/             # C++ coverage collection
 │   └── dotnet/          # C# coverage collection
-├── tests/e2e/           # ✅ End-to-end verification tests
-└── docs/                # 📚 Detailed documentation
+├── tests/e2e/           # End-to-end verification tests
+└── docs/                # Detailed documentation
 ```
 
-## 📚 Documentation
+## Documentation
 
 | Document | Description |
 |----------|-------------|
@@ -227,11 +240,11 @@ TiaCC/
 | [Integration Guide](docs/integration-guide.md) | How to integrate into your project |
 | [E2E Tests](tests/e2e/README.md) | End-to-end verification tests |
 
-## 🤝 Contributing
+## Contributing
 
 Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) to learn how.
 
-## 📄 License
+## License
 
 MIT License - See [LICENSE](LICENSE)
 
@@ -239,8 +252,8 @@ MIT License - See [LICENSE](LICENSE)
 
 <div align="center">
 
-**⭐ If TiaCC helped you, please give it a Star!**
+**If TiaCC helped you, please give it a Star!**
 
-Made with ❤️ by the TiaCC Team
+Made with by the TiaCC Team
 
 </div>

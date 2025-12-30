@@ -4,293 +4,43 @@ on:
   push:
     branches: [ main, develop, "claude/*" ]
     paths:
-      - 'tools-node/**'
       - 'tools-dotnet/**'
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'tools-node/**'
       - 'tools-dotnet/**'
 
 jobs:
-  # Job 1: 每周全量测试，构建基准映射数据库
-  nightly-build-map:
-    name: 📊 Build Test Impact Map (Nightly)
-    runs-on: ubuntu-latest
-    # 只在主分支的 push 或手动触发时运行
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
-    steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
-
-      - name: 📦 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'tools-node/package-lock.json'
-
-      - name: 📚 Install dependencies
-        working-directory: tools-node
-        run: npm ci
-
-      - name: 🧪 Generate independent coverage for each test
-        working-directory: tools-node
-        run: |
-          mkdir -p tiacc-data/coverage
-
-          echo "🔍 Discovering test files..."
-          TEST_FILES=$(find tests -name "*.test.ts" -type f | sort)
-          TEST_COUNT=$(echo "$TEST_FILES" | wc -l)
-          echo "Found $TEST_COUNT test files"
-
-          echo ""
-          echo "🧪 Generating independent coverage for each test..."
-
-          PROCESSED=0
-          for TEST_FILE in $TEST_FILES; do
-            PROCESSED=$((PROCESSED + 1))
-            TEST_NAME=$(basename "$TEST_FILE" .test.ts)
-            echo "[$PROCESSED/$TEST_COUNT] Running $TEST_NAME..."
-
-            # Clean previous coverage
-            rm -rf coverage
-
-            # Run single test with coverage
-            npm test -- --coverage --run "$TEST_FILE" --silent 2>/dev/null || {
-              echo "  ⚠️ Test $TEST_NAME failed, skipping"
-              continue
-            }
-
-            # Save coverage with TiaCC naming format
-            if [ -f "coverage/cobertura-coverage.xml" ]; then
-              cp coverage/cobertura-coverage.xml "tiacc-data/coverage/test_${TEST_NAME}.cobertura.xml"
-              echo "  ✅ Coverage saved"
-            fi
-          done
-
-          echo ""
-          echo "📊 Generated coverage files:"
-          ls -1 tiacc-data/coverage/
-
-      - name: 🗺️ Build test impact mapping database
-        working-directory: tools-node
-        run: |
-          # 使用 TiaCC 自己的 mapper 工具构建映射数据库
-          npx tsx src/cli/mapper.ts build \
-            --coverage-dir tiacc-data/coverage \
-            --db tiacc-data/impact_map.db \
-            --test-id-from-filename \
-            --commit ${{ github.sha }}
-
-          # 显示统计信息
-          npx tsx src/cli/mapper.ts stats --db tiacc-data/impact_map.db
-
-      - name: 💾 Upload impact map as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tiacc-impact-map
-          path: tools-node/tiacc-data/impact_map.db
-          retention-days: 30
-
-      - name: 📊 Generate coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: tools-node/coverage/
-          retention-days: 7
-
-  # Job 2: PR 时智能选择受影响的测试
-  smart-test-selection:
-    name: 🎯 Smart Test Selection (PR)
-    runs-on: ubuntu-latest
-    # 只在 PR 时运行
-    if: github.event_name == 'pull_request'
-
-    steps:
-      - name: 📥 Checkout PR code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # 获取完整历史以便 diff
-
-      - name: 📦 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'tools-node/package-lock.json'
-
-      - name: 📚 Install dependencies
-        working-directory: tools-node
-        run: npm ci
-
-      - name: 🔍 Detect changed files
-        id: changed-files
-        working-directory: tools-node
-        run: |
-          # 获取 PR 中变更的文件
-          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
-
-          echo "📝 Changed files in this PR:"
-          cat changed_files.txt
-
-          # 过滤出 src/ 目录下的 .ts 文件
-          grep '^src/.*\.ts$' changed_files.txt > changed_src_files.txt || true
-
-          if [ -s changed_src_files.txt ]; then
-            echo "✅ Found changed source files:"
-            cat changed_src_files.txt
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          else
-            echo "ℹ️  No source files changed, will run all tests"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 💡 Download previous impact map
-        if: steps.changed-files.outputs.has_changes == 'true'
-        uses: dawidd6/action-download-artifact@v3
-        continue-on-error: true
-        with:
-          workflow: tiacc-self-test.yml
-          name: tiacc-impact-map
-          path: tools-node/tiacc-data
-          search_artifacts: true
-
-      - name: 🎯 Get affected tests (using TiaCC!)
-        id: affected-tests
-        if: steps.changed-files.outputs.has_changes == 'true'
-        working-directory: tools-node
-        run: |
-          if [ -f "tiacc-data/impact_map.db" ]; then
-            echo "✅ Found impact map, using TiaCC to recommend tests..."
-
-            # 使用 TiaCC 的 recommend 工具获取受影响的测试
-            npx tsx src/cli/recommend.ts \
-              --db tiacc-data/impact_map.db \
-              --branch origin/${{ github.base_ref }} \
-              --output affected_tests.txt || true
-
-            if [ -s affected_tests.txt ]; then
-              echo "🎯 Affected tests:"
-              cat affected_tests.txt
-              echo "test_filter=$(cat affected_tests.txt | tr '\n' '|' | sed 's/|$//')" >> $GITHUB_OUTPUT
-              echo "run_mode=smart" >> $GITHUB_OUTPUT
-            else
-              echo "ℹ️  No affected tests found, running all tests"
-              echo "run_mode=all" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "⚠️  Impact map not found, running all tests"
-            echo "run_mode=all" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 🧪 Run tests (Smart or Full)
-        working-directory: tools-node
-        run: |
-          if [ "${{ steps.affected-tests.outputs.run_mode }}" == "smart" ]; then
-            echo "🎯 Running ONLY affected tests..."
-            echo "Test filter: ${{ steps.affected-tests.outputs.test_filter }}"
-            npm test -- --run --reporter=verbose --testNamePattern="${{ steps.affected-tests.outputs.test_filter }}"
-          else
-            echo "🧪 Running ALL tests..."
-            npm test -- --run
-          fi
-
-      - name: 📊 Generate coverage for changed files
-        if: always()
-        working-directory: tools-node
-        run: npm test -- --coverage --run
-
-      - name: 💬 Comment PR with results
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const runMode = '${{ steps.affected-tests.outputs.run_mode }}';
-            const testFilter = '${{ steps.affected-tests.outputs.test_filter }}';
-
-            let body = '## 🎯 TiaCC Self-Test Results\n\n';
-
-            if (runMode === 'smart') {
-              body += '✅ **Smart Test Selection Enabled!**\n\n';
-              body += `TiaCC analyzed the code changes and recommended running only the affected tests:\n\n`;
-              body += '```\n' + testFilter.split('|').join('\n') + '\n```\n\n';
-              body += '💡 This is TiaCC dogfooding itself - using its own tools to optimize its own CI!\n';
-            } else {
-              body += '🧪 **Full Test Suite Run**\n\n';
-              body += 'Either no impact map was available, or no specific tests were affected.\n';
-            }
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
-
-  # Job 3: 验证 TiaCC 的 dogfooding 演示脚本
-  verify-demo-script:
-    name: 🐕 Verify Dogfooding Demo Script
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
-
-      - name: 📦 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'tools-node/package-lock.json'
-
-      - name: 📚 Install dependencies
-        working-directory: tools-node
-        run: npm ci
-
-      - name: 🐕 Run dogfooding demo script
-        working-directory: tools-node
-        run: bash scripts/build-self-test-map.sh
-
-      - name: 📤 Upload demo artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tiacc-dogfooding-demo
-          path: tools-node/tiacc-data/
-          retention-days: 7
-
-  # Job 4: .NET 全量测试，构建映射数据库
+  # Job 1: .NET 全量测试，构建映射数据库
   dotnet-build-map:
-    name: 📊 Build .NET Test Impact Map
+    name: Build .NET Test Impact Map
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 📦 Setup .NET
+      - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
-      - name: 📚 Restore dependencies
+      - name: Restore dependencies
         working-directory: tools-dotnet
         run: dotnet restore
 
-      - name: 🔨 Build solution
+      - name: Build solution
         working-directory: tools-dotnet
         run: dotnet build -c Release --no-restore
 
-      - name: 🧪 Generate coverage for each test class
+      - name: Generate coverage for each test class
         working-directory: tools-dotnet
         run: |
           mkdir -p tiacc-data/coverage
 
-          echo "🔍 Running tests with coverage..."
+          echo "Running tests with coverage..."
           TEST_CLASSES=("CoverageParserTests" "DatabaseServiceTests" "GitServiceTests" "SymbolExtractorTests")
 
           for TEST_CLASS in "${TEST_CLASSES[@]}"; do
@@ -310,15 +60,15 @@ jobs:
             COVERAGE_FILE=$(find "tiacc-data/coverage/$TEST_CLASS" -name "coverage.cobertura.xml" -type f | head -1)
             if [ -n "$COVERAGE_FILE" ]; then
               cp "$COVERAGE_FILE" "tiacc-data/coverage/test_${TEST_CLASS}.cobertura.xml"
-              echo "✅ Coverage saved for $TEST_CLASS"
+              echo "Coverage saved for $TEST_CLASS"
             fi
           done
 
           echo ""
-          echo "📊 Generated coverage files:"
+          echo "Generated coverage files:"
           ls -1 tiacc-data/coverage/*.xml 2>/dev/null || echo "No coverage files found"
 
-      - name: 🗺️ Build test impact mapping database
+      - name: Build test impact mapping database
         working-directory: tools-dotnet
         run: |
           # Initialize database
@@ -340,58 +90,58 @@ jobs:
           # Show statistics
           dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- stats --db tiacc-data/impact_map.db
 
-      - name: 💾 Upload .NET impact map as artifact
+      - name: Upload .NET impact map as artifact
         uses: actions/upload-artifact@v4
         with:
           name: tiacc-dotnet-impact-map
           path: tools-dotnet/tiacc-data/impact_map.db
           retention-days: 30
 
-  # Job 5: .NET PR 智能测试选择
+  # Job 2: .NET PR 智能测试选择
   dotnet-smart-test:
-    name: 🎯 .NET Smart Test Selection (PR)
+    name: .NET Smart Test Selection (PR)
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
 
     steps:
-      - name: 📥 Checkout PR code
+      - name: Checkout PR code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 📦 Setup .NET
+      - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
-      - name: 📚 Restore and build
+      - name: Restore and build
         working-directory: tools-dotnet
         run: |
           dotnet restore
           dotnet build -c Release --no-restore
 
-      - name: 🔍 Detect changed files
+      - name: Detect changed files
         id: changed-files
         working-directory: tools-dotnet
         run: |
           git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
-          echo "📝 Changed files in this PR:"
+          echo "Changed files in this PR:"
           cat changed_files.txt
 
           # Filter for .cs files in tools-dotnet
           grep '^tools-dotnet/.*\.cs$' changed_files.txt > changed_cs_files.txt || true
 
           if [ -s changed_cs_files.txt ]; then
-            echo "✅ Found changed .NET source files:"
+            echo "Found changed .NET source files:"
             cat changed_cs_files.txt
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
-            echo "ℹ️  No .NET source files changed"
+            echo "No .NET source files changed"
             echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 💡 Download previous .NET impact map
+      - name: Download previous .NET impact map
         if: steps.changed-files.outputs.has_changes == 'true'
         uses: dawidd6/action-download-artifact@v3
         continue-on-error: true
@@ -401,13 +151,13 @@ jobs:
           path: tools-dotnet/tiacc-data
           search_artifacts: true
 
-      - name: 🎯 Get affected tests
+      - name: Get affected tests
         id: affected-tests
         if: steps.changed-files.outputs.has_changes == 'true'
         working-directory: tools-dotnet
         run: |
           if [ -f "tiacc-data/impact_map.db" ]; then
-            echo "✅ Found .NET impact map, querying affected tests..."
+            echo "Found .NET impact map, querying affected tests..."
 
             # Get relative paths of changed files
             CHANGED_FILES=$(cat changed_cs_files.txt | sed 's|^tools-dotnet/||' | tr '\n' ' ')
@@ -417,53 +167,53 @@ jobs:
               --files $CHANGED_FILES 2>/dev/null || echo "")
 
             if [ -n "$AFFECTED" ] && [ "$AFFECTED" != "No affected tests found." ]; then
-              echo "🎯 Affected tests:"
+              echo "Affected tests:"
               echo "$AFFECTED"
               echo "test_filter=$AFFECTED" >> $GITHUB_OUTPUT
               echo "run_mode=smart" >> $GITHUB_OUTPUT
             else
-              echo "ℹ️  No affected tests found, running all tests"
+              echo "No affected tests found, running all tests"
               echo "run_mode=all" >> $GITHUB_OUTPUT
             fi
           else
-            echo "⚠️  .NET impact map not found, running all tests"
+            echo ".NET impact map not found, running all tests"
             echo "run_mode=all" >> $GITHUB_OUTPUT
           fi
 
-      - name: 🧪 Run .NET tests
+      - name: Run .NET tests
         working-directory: tools-dotnet
         run: |
           if [ "${{ steps.affected-tests.outputs.run_mode }}" == "smart" ]; then
-            echo "🎯 Running ONLY affected .NET tests..."
+            echo "Running ONLY affected .NET tests..."
             FILTER="${{ steps.affected-tests.outputs.test_filter }}"
             # Convert space-separated list to filter expression
             FILTER_EXPR=$(echo "$FILTER" | tr ' ' '\n' | sed 's/.*/FullyQualifiedName~&/' | tr '\n' '|' | sed 's/|$//')
             dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --filter "$FILTER_EXPR"
           else
-            echo "🧪 Running ALL .NET tests..."
+            echo "Running ALL .NET tests..."
             dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj
           fi
 
-  # Job 6: 验证 .NET dogfooding 脚本
+  # Job 3: 验证 .NET dogfooding 脚本
   dotnet-verify-demo:
-    name: 🐕 Verify .NET Dogfooding Script
+    name: Verify .NET Dogfooding Script
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 📦 Setup .NET
+      - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
-      - name: 🐕 Run .NET dogfooding script
+      - name: Run .NET dogfooding script
         working-directory: tools-dotnet
         run: bash scripts/build-self-test-map.sh
 
-      - name: 📤 Upload .NET demo artifacts
+      - name: Upload .NET demo artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
