@@ -56,3 +56,9 @@ Thumbs.db
 # Node.js (if any dependencies are installed locally)
 node_modules/
 package-lock.json
+
+# Test & Coverage Reports
+coverage-report*/
+coverage-results*/
+test-output.txt
+test-results/

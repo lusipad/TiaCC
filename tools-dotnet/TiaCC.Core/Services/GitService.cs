@@ -251,9 +251,16 @@ public class GitService
         };
 
         process.Start();
-        var output = process.StandardOutput.ReadToEnd();
-        var error = process.StandardError.ReadToEnd();
+
+        // Read stdout and stderr asynchronously to prevent deadlock
+        // when either buffer fills up
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+
         process.WaitForExit();
+
+        var output = outputTask.GetAwaiter().GetResult();
+        var error = errorTask.GetAwaiter().GetResult();
 
         if (process.ExitCode != 0)
         {
