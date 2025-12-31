@@ -21,11 +21,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-          include-prerelease: true
+      - name: Install .NET 10 (Daily)
+        run: |
+          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel 10.0 --quality daily
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
 
       - name: Restore dependencies
         working-directory: tools-dotnet
@@ -109,11 +111,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-          include-prerelease: true
+      - name: Install .NET 10 (Daily)
+        run: |
+          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel 10.0 --quality daily
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
 
       - name: Restore and build
         working-directory: tools-dotnet
@@ -203,11 +207,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-          include-prerelease: true
+      - name: Install .NET 10 (Daily)
+        run: |
+          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel 10.0 --quality daily
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
 
       - name: Run .NET dogfooding script
         working-directory: tools-dotnet
