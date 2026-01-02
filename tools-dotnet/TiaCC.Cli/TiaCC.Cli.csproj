@@ -5,10 +5,30 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- Package configuration -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tia-mapper</ToolCommandName>
     <PackageOutputPath>./nupkg</PackageOutputPath>
+
+    <!-- Package metadata -->
+    <PackageId>TiaCC.Cli</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>TiaCC Team</Authors>
+    <Company>TiaCC</Company>
+    <Description>TiaCC (Test Impact Analysis &amp; Code Coverage) - CLI tool for intelligent test selection based on code coverage analysis. Only run tests affected by your code changes.</Description>
+    <PackageTags>testing;coverage;test-impact-analysis;ci;cd;tia;dotnet-tool</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/lusipad/TiaCC</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/lusipad/TiaCC</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>See https://github.com/lusipad/TiaCC/releases for release notes</PackageReleaseNotes>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\TiaCC.Core\TiaCC.Core.csproj" />

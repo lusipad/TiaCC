@@ -1,0 +1,147 @@
+name: Publish TiaCC
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 当推送版本标签时触发，例如 v1.0.0
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build-and-publish:
+    name: Build and Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # 从标签中提取版本号，去掉 'v' 前缀
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
+      - name: Restore dependencies
+        working-directory: tools-dotnet
+        run: dotnet restore
+
+      - name: Build TiaCC.Cli
+        working-directory: tools-dotnet
+        run: |
+          dotnet build TiaCC.Cli/TiaCC.Cli.csproj \
+            -c Release \
+            --no-restore \
+            /p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Run tests
+        working-directory: tools-dotnet
+        run: dotnet test -c Release --no-build
+
+      - name: Pack NuGet package
+        working-directory: tools-dotnet
+        run: |
+          dotnet pack TiaCC.Cli/TiaCC.Cli.csproj \
+            -c Release \
+            --no-build \
+            -o ./artifacts \
+            /p:Version=${{ steps.version.outputs.VERSION }} \
+            /p:PackageVersion=${{ steps.version.outputs.VERSION }}
+
+      - name: List generated packages
+        working-directory: tools-dotnet
+        run: |
+          echo "Generated NuGet packages:"
+          ls -lh artifacts/*.nupkg
+
+      # 发布到 NuGet.org
+      - name: Publish to NuGet.org
+        working-directory: tools-dotnet
+        if: success()
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "⚠️  NUGET_API_KEY secret not configured, skipping NuGet.org publish"
+            echo "To publish to NuGet.org, add NUGET_API_KEY secret to your repository"
+          else
+            echo "Publishing to NuGet.org..."
+            dotnet nuget push artifacts/*.nupkg \
+              --api-key $NUGET_API_KEY \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          fi
+
+      # 发布到 GitHub Packages
+      - name: Publish to GitHub Packages
+        working-directory: tools-dotnet
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Publishing to GitHub Packages..."
+          dotnet nuget push artifacts/*.nupkg \
+            --api-key $GITHUB_TOKEN \
+            --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json \
+            --skip-duplicate || echo "⚠️  GitHub Packages publish failed or package already exists"
+
+      # 创建 GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: tools-dotnet/artifacts/*.nupkg
+          generate_release_notes: true
+          body: |
+            ## TiaCC v${{ steps.version.outputs.VERSION }}
+
+            ### 安装方式
+
+            #### 作为 .NET Global Tool 安装：
+            ```bash
+            dotnet tool install --global TiaCC.Cli --version ${{ steps.version.outputs.VERSION }}
+            ```
+
+            #### 或者从 GitHub Packages 安装：
+            ```bash
+            dotnet tool install --global TiaCC.Cli \
+              --version ${{ steps.version.outputs.VERSION }} \
+              --add-source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+            ```
+
+            ### 使用方式
+
+            安装后，可以使用 `tia-mapper` 命令：
+            ```bash
+            tia-mapper --help
+            ```
+
+            详细文档请参阅 [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 上传构建产物
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nuget-packages-${{ steps.version.outputs.VERSION }}
+          path: tools-dotnet/artifacts/*.nupkg
+          retention-days: 30
