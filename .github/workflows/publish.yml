@@ -12,9 +12,12 @@ on:
         type: string
 
 jobs:
-  build-and-publish:
-    name: Build and Publish
+  # Job 1: 测试和打包 NuGet
+  test-and-pack:
+    name: Test and Pack NuGet
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
 
     steps:
       - name: Checkout code
@@ -71,9 +74,108 @@ jobs:
           echo "Generated NuGet packages:"
           ls -lh artifacts/*.nupkg
 
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: tools-dotnet/artifacts/*.nupkg
+          retention-days: 7
+
+  # Job 2: 构建多平台可执行程序
+  build-executables:
+    name: Build ${{ matrix.runtime }} Executable
+    needs: test-and-pack
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            runtime: win-x64
+            artifact_name: tiacc-win-x64.zip
+          - os: ubuntu-latest
+            runtime: linux-x64
+            artifact_name: tiacc-linux-x64.tar.gz
+          - os: ubuntu-latest
+            runtime: linux-arm64
+            artifact_name: tiacc-linux-arm64.tar.gz
+          - os: macos-latest
+            runtime: osx-x64
+            artifact_name: tiacc-osx-x64.tar.gz
+          - os: macos-latest
+            runtime: osx-arm64
+            artifact_name: tiacc-osx-arm64.tar.gz
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish self-contained executable
+        working-directory: tools-dotnet
+        run: |
+          dotnet publish TiaCC.Cli/TiaCC.Cli.csproj \
+            -c Release \
+            -r ${{ matrix.runtime }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:PublishTrimmed=true \
+            -p:Version=${{ needs.test-and-pack.outputs.version }} \
+            -o ./publish/${{ matrix.runtime }}
+
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        working-directory: tools-dotnet/publish/${{ matrix.runtime }}
+        run: |
+          Compress-Archive -Path * -DestinationPath ../../${{ matrix.artifact_name }}
+        shell: pwsh
+
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        working-directory: tools-dotnet/publish
+        run: |
+          tar -czf ../${{ matrix.artifact_name }} -C ${{ matrix.runtime }} .
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: executable-${{ matrix.runtime }}
+          path: tools-dotnet/${{ matrix.artifact_name }}
+          retention-days: 7
+
+  # Job 3: 发布到 NuGet 和 GitHub
+  publish:
+    name: Publish Packages
+    needs: [test-and-pack, build-executables]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download NuGet packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./nuget-artifacts
+
+      - name: Download all executables
+        uses: actions/download-artifact@v4
+        with:
+          pattern: executable-*
+          path: ./exe-artifacts
+          merge-multiple: true
+
+      - name: List all artifacts
+        run: |
+          echo "NuGet packages:"
+          ls -lh nuget-artifacts/
+          echo ""
+          echo "Executables:"
+          ls -lh exe-artifacts/
+
       # 发布到 NuGet.org
       - name: Publish to NuGet.org
-        working-directory: tools-dotnet
         if: success()
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
@@ -83,7 +185,7 @@ jobs:
             echo "To publish to NuGet.org, add NUGET_API_KEY secret to your repository"
           else
             echo "Publishing to NuGet.org..."
-            dotnet nuget push artifacts/*.nupkg \
+            dotnet nuget push nuget-artifacts/*.nupkg \
               --api-key $NUGET_API_KEY \
               --source https://api.nuget.org/v3/index.json \
               --skip-duplicate
@@ -91,13 +193,12 @@ jobs:
 
       # 发布到 GitHub Packages
       - name: Publish to GitHub Packages
-        working-directory: tools-dotnet
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Publishing to GitHub Packages..."
-          dotnet nuget push artifacts/*.nupkg \
+          dotnet nuget push nuget-artifacts/*.nupkg \
             --api-key $GITHUB_TOKEN \
             --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json \
             --skip-duplicate || echo "⚠️  GitHub Packages publish failed or package already exists"
@@ -107,41 +208,62 @@ jobs:
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: tools-dotnet/artifacts/*.nupkg
+          files: |
+            nuget-artifacts/*.nupkg
+            exe-artifacts/*.zip
+            exe-artifacts/*.tar.gz
           generate_release_notes: true
           body: |
-            ## TiaCC v${{ steps.version.outputs.VERSION }}
+            ## TiaCC v${{ needs.test-and-pack.outputs.version }}
 
-            ### 安装方式
+            ### 📦 安装方式
 
-            #### 作为 .NET Global Tool 安装：
+            #### 方式 1：独立可执行程序（无需 .NET SDK）
+
+            下载适合你操作系统的压缩包：
+            - **Windows (x64)**: `tiacc-win-x64.zip`
+            - **Linux (x64)**: `tiacc-linux-x64.tar.gz`
+            - **Linux (ARM64)**: `tiacc-linux-arm64.tar.gz`
+            - **macOS (Intel)**: `tiacc-osx-x64.tar.gz`
+            - **macOS (Apple Silicon)**: `tiacc-osx-arm64.tar.gz`
+
+            解压后直接运行可执行文件：
             ```bash
-            dotnet tool install --global TiaCC.Cli --version ${{ steps.version.outputs.VERSION }}
+            # Windows
+            .\tia-mapper.exe --help
+
+            # Linux/macOS
+            chmod +x tia-mapper
+            ./tia-mapper --help
             ```
 
-            #### 或者从 GitHub Packages 安装：
+            #### 方式 2：.NET Global Tool（需要 .NET SDK）
+
+            ```bash
+            dotnet tool install --global TiaCC.Cli --version ${{ needs.test-and-pack.outputs.version }}
+            ```
+
+            或者从 GitHub Packages 安装：
             ```bash
             dotnet tool install --global TiaCC.Cli \
-              --version ${{ steps.version.outputs.VERSION }} \
+              --version ${{ needs.test-and-pack.outputs.version }} \
               --add-source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
             ```
 
-            ### 使用方式
+            ### 🚀 使用方式
 
             安装后，可以使用 `tia-mapper` 命令：
             ```bash
             tia-mapper --help
+            tia-mapper init --db impact_map.db
+            tia-mapper map --db impact_map.db --coverage coverage.xml --test MyTest
+            tia-mapper query --db impact_map.db --files src/MyFile.cs
             ```
 
-            详细文档请参阅 [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
+            ### 📚 文档
+
+            详细文档请参阅：
+            - [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
+            - [发布指南](https://github.com/${{ github.repository }}/blob/main/docs/publishing.md)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # 上传构建产物
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: nuget-packages-${{ steps.version.outputs.VERSION }}
-          path: tools-dotnet/artifacts/*.nupkg
-          retention-days: 30
