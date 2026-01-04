@@ -92,9 +92,10 @@ jobs:
 
       - name: Download previous .NET impact map
         if: steps.changed-files.outputs.has_changes == 'true'
-        uses: dawidd6/action-download-artifact@v3
+        uses: dawidd6/action-download-artifact@v12
         continue-on-error: true
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: tiacc-self-test.yml
           name: tiacc-dotnet-impact-map
           path: tools-dotnet/tiacc-data
