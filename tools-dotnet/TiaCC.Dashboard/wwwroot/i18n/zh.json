@@ -1,0 +1,57 @@
+{
+  "app.title": "TiaCC 覆盖率仪表盘",
+  "app.footer": "TiaCC - C/C++ 测试影响分析工具",
+
+  "nav.overview": "概览",
+  "nav.treemap": "树状图",
+  "nav.files": "文件",
+  "nav.search": "搜索",
+  "nav.dotplot": "点阵图",
+
+  "overview.totalFiles": "总文件数",
+  "overview.coveredFiles": "已覆盖文件",
+  "overview.avgCoverage": "平均覆盖率",
+  "overview.totalTests": "测试总数",
+  "overview.moduleCoverage": "模块覆盖率",
+  "overview.module": "模块",
+  "overview.files": "文件数",
+  "overview.coverage": "覆盖率",
+
+  "treemap.title": "覆盖率树状图",
+  "treemap.hint": "点击目录深入查看，使用面包屑导航返回。",
+  "treemap.root": "根目录",
+
+  "files.title": "文件浏览器",
+  "files.hint": "浏览所有源文件及其覆盖状态。",
+
+  "search.title": "搜索文件",
+  "search.hint": "按文件名或路径搜索。",
+  "search.placeholder": "输入文件名或路径...",
+  "search.results": "搜索结果",
+  "search.noResults": "未找到匹配的文件。",
+
+  "dotplot.title": "覆盖率风险矩阵",
+  "dotplot.hintModules": "点击模块查看文件详情。滚轮缩放，拖拽平移。",
+  "dotplot.hintExpanded": "查看模块：{0}（{1} 个文件）",
+  "dotplot.back": "← 返回",
+  "dotplot.resetAll": "↺ 重置",
+  "dotplot.coverage": "覆盖率",
+  "dotplot.minTests": "最少测试",
+  "dotplot.hide100": "隐藏100%",
+  "dotplot.modules": "模块",
+  "dotplot.filesCount": "文件",
+  "dotplot.legend": "图例",
+  "dotplot.moduleAggregated": "模块（聚合）",
+  "dotplot.avgCoverage": "平均覆盖率",
+  "dotplot.filesInModule": "模块内文件",
+  "dotplot.moreFiles": "... 还有 {0} 个文件",
+  "dotplot.testImpact": "测试影响",
+  "dotplot.associatedTests": "关联测试",
+  "dotplot.noTests": "暂无测试覆盖此文件。",
+  "dotplot.selectHint": "选择模块或文件",
+  "dotplot.selectHintSub": "点击模块气泡查看详情",
+
+  "common.loading": "加载中...",
+  "common.error": "发生错误",
+  "common.noData": "暂无数据"
+}

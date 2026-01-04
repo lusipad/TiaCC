@@ -1,3 +1,4 @@
+/* Light Theme (Default) */
 :root {
     --primary-color: #2563eb;
     --primary-dark: #1d4ed8;
@@ -9,6 +10,24 @@
     --text-color: #1e293b;
     --text-muted: #64748b;
     --border-color: #e2e8f0;
+    --shadow-color: rgba(0, 0, 0, 0.1);
+    --hover-bg: #f1f5f9;
+}
+
+/* Dark Theme */
+html.dark {
+    --primary-color: #60a5fa;
+    --primary-dark: #3b82f6;
+    --success-color: #34d399;
+    --warning-color: #fbbf24;
+    --danger-color: #f87171;
+    --bg-color: #0f172a;
+    --card-bg: #1e293b;
+    --text-color: #f1f5f9;
+    --text-muted: #94a3b8;
+    --border-color: #334155;
+    --shadow-color: rgba(0, 0, 0, 0.3);
+    --hover-bg: #334155;
 }
 
 * {
@@ -366,6 +385,53 @@ tr:hover {
     margin-left: 1rem;
 }
 
+/* Theme & Language Toggle */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.toggle-btn {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    width: 36px;
+    height: 36px;
+}
+
+.toggle-btn:hover {
+    background: var(--hover-bg);
+    color: var(--text-color);
+}
+
+.toggle-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.lang-select {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    outline: none;
+}
+
+.lang-select:hover {
+    background: var(--hover-bg);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .app-header {
@@ -379,5 +445,10 @@ tr:hover {
 
     .stats-grid {
         grid-template-columns: 1fr 1fr;
+    }
+
+    .header-actions {
+        order: -1;
+        align-self: flex-end;
     }
 }

@@ -1,0 +1,57 @@
+{
+  "app.title": "TiaCC Coverage Dashboard",
+  "app.footer": "TiaCC - Test Impact Analysis for C/C++",
+
+  "nav.overview": "Overview",
+  "nav.treemap": "Treemap",
+  "nav.files": "Files",
+  "nav.search": "Search",
+  "nav.dotplot": "Dot Plot",
+
+  "overview.totalFiles": "Total Files",
+  "overview.coveredFiles": "Covered Files",
+  "overview.avgCoverage": "Average Coverage",
+  "overview.totalTests": "Total Tests",
+  "overview.moduleCoverage": "Module Coverage",
+  "overview.module": "Module",
+  "overview.files": "Files",
+  "overview.coverage": "Coverage",
+
+  "treemap.title": "Coverage Treemap",
+  "treemap.hint": "Click on directories to drill down. Use breadcrumbs to navigate back.",
+  "treemap.root": "Root",
+
+  "files.title": "File Explorer",
+  "files.hint": "Browse all source files and their coverage status.",
+
+  "search.title": "Search Files",
+  "search.hint": "Search for files by name or path.",
+  "search.placeholder": "Enter filename or path...",
+  "search.results": "Results",
+  "search.noResults": "No files found matching your search.",
+
+  "dotplot.title": "Coverage Risk Matrix",
+  "dotplot.hintModules": "Click a module to explore its files. Use mouse wheel to zoom, drag to pan.",
+  "dotplot.hintExpanded": "Viewing module: {0} ({1} files)",
+  "dotplot.back": "← Back",
+  "dotplot.resetAll": "↺ Reset All",
+  "dotplot.coverage": "Coverage",
+  "dotplot.minTests": "Min Tests",
+  "dotplot.hide100": "Hide 100%",
+  "dotplot.modules": "Modules",
+  "dotplot.filesCount": "Files",
+  "dotplot.legend": "Coverage Legend",
+  "dotplot.moduleAggregated": "Module (aggregated)",
+  "dotplot.avgCoverage": "Avg Coverage",
+  "dotplot.filesInModule": "Files in Module",
+  "dotplot.moreFiles": "... and {0} more files",
+  "dotplot.testImpact": "Test Impact",
+  "dotplot.associatedTests": "Associated Tests",
+  "dotplot.noTests": "No tests cover this file.",
+  "dotplot.selectHint": "Select a module or file",
+  "dotplot.selectHintSub": "Click on a module bubble to explore its files",
+
+  "common.loading": "Loading...",
+  "common.error": "An error occurred",
+  "common.noData": "No data available"
+}

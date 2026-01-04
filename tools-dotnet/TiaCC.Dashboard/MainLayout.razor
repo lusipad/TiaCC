@@ -1,14 +1,52 @@
 @inherits LayoutComponentBase
+@inject I18nService I18n
+@inject IJSRuntime JS
+@implements IDisposable
 
 <div class="app-container">
     <header class="app-header">
-        <h1>TiaCC Coverage Dashboard</h1>
+        <h1>@I18n.T("app.title")</h1>
         <nav>
-            <NavLink href="" Match="NavLinkMatch.All">Overview</NavLink>
-            <NavLink href="treemap">Treemap</NavLink>
-            <NavLink href="files">Files</NavLink>
-            <NavLink href="search">Search</NavLink>
+            <NavLink href="" Match="NavLinkMatch.All">@I18n.T("nav.overview")</NavLink>
+            <NavLink href="treemap">@I18n.T("nav.treemap")</NavLink>
+            <NavLink href="files">@I18n.T("nav.files")</NavLink>
+            <NavLink href="search">@I18n.T("nav.search")</NavLink>
+            <NavLink href="dotplot">@I18n.T("nav.dotplot")</NavLink>
         </nav>
+        <div class="header-actions">
+            <!-- Language Selector -->
+            <select class="lang-select" @onchange="OnLanguageChanged">
+                @foreach (var locale in I18nService.SupportedLocales)
+                {
+                    @if (I18n.CurrentLocale == locale.Code)
+                    {
+                        <option value="@locale.Code" selected>@locale.Name</option>
+                    }
+                    else
+                    {
+                        <option value="@locale.Code">@locale.Name</option>
+                    }
+                }
+            </select>
+
+            <!-- Theme Toggle -->
+            <button class="toggle-btn" @onclick="ToggleTheme" title="@(_isDark ? "Light Mode" : "Dark Mode")">
+                @if (_isDark)
+                {
+                    <!-- Sun Icon -->
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                }
+                else
+                {
+                    <!-- Moon Icon -->
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                    </svg>
+                }
+            </button>
+        </div>
     </header>
 
     <main class="app-main">
@@ -16,6 +54,67 @@
     </main>
 
     <footer class="app-footer">
-        <p>TiaCC - Test Impact Analysis for C/C++</p>
+        <p>@I18n.T("app.footer")</p>
     </footer>
 </div>
+
+@code {
+    private bool _isDark = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Load theme preference from localStorage
+            var savedTheme = await JS.InvokeAsync<string>("localStorage.getItem", "theme");
+            _isDark = savedTheme == "dark";
+            await ApplyTheme();
+
+            // Load language preference
+            var savedLang = await JS.InvokeAsync<string>("localStorage.getItem", "lang");
+            if (!string.IsNullOrEmpty(savedLang))
+            {
+                await I18n.SetLocaleAsync(savedLang);
+            }
+
+            I18n.OnLanguageChanged += OnI18nChanged;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        _isDark = !_isDark;
+        await ApplyTheme();
+        await JS.InvokeVoidAsync("localStorage.setItem", "theme", _isDark ? "dark" : "light");
+    }
+
+    private async Task ApplyTheme()
+    {
+        if (_isDark)
+        {
+            await JS.InvokeVoidAsync("eval", "document.documentElement.classList.add('dark')");
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("eval", "document.documentElement.classList.remove('dark')");
+        }
+    }
+
+    private async Task OnLanguageChanged(ChangeEventArgs e)
+    {
+        var locale = e.Value?.ToString() ?? "en";
+        await I18n.SetLocaleAsync(locale);
+        await JS.InvokeVoidAsync("localStorage.setItem", "lang", locale);
+    }
+
+    private void OnI18nChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        I18n.OnLanguageChanged -= OnI18nChanged;
+    }
+}

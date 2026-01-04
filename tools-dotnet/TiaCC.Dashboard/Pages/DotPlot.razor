@@ -1,0 +1,443 @@
+@page "/dotplot"
+@inject CoverageDataService DataService
+@inject I18nService I18n
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>TiaCC Dashboard - @I18n.T("dotplot.title")</PageTitle>
+
+<div class="card" style="height: calc(100vh - 120px); display: flex; flex-direction: column; overflow: hidden;">
+    <div style="flex: 0 0 auto; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2 class="card-title" style="margin-bottom: 0.25rem;">@I18n.T("dotplot.title")</h2>
+            <p style="color: var(--text-muted); margin: 0; font-size: 0.875rem;">
+                @if (string.IsNullOrEmpty(_expandedModule))
+                {
+                    <span>@I18n.T("dotplot.hintModules")</span>
+                }
+                else
+                {
+                    <span>
+                        <button class="back-btn" @onclick="GoBack" title="@I18n.T("dotplot.back")">
+                            @I18n.T("dotplot.back")
+                        </button>
+                        @I18n.T("dotplot.hintExpanded", _expandedModule, GetModuleFileCount())
+                    </span>
+                }
+            </p>
+        </div>
+        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+            <!-- Coverage Range Filter -->
+            <div class="filter-group">
+                <label>@I18n.T("dotplot.coverage"):</label>
+                <input type="range" min="0" max="100" step="5" @bind="_minCoverage" @bind:after="OnFilterChanged"
+                       style="width: 60px;" title="@_minCoverage%" />
+                <span style="font-size: 0.75rem;">@_minCoverage%-100%</span>
+            </div>
+
+            <!-- Test Count Filter -->
+            <div class="filter-group">
+                <label>@I18n.T("dotplot.minTests"):</label>
+                <input type="number" min="0" @bind="_minTestCount" @bind:after="OnFilterChanged"
+                       style="width: 50px;" />
+            </div>
+
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; cursor: pointer;">
+                <input type="checkbox" @bind="_hideFullCoverage" @bind:after="OnFilterChanged" />
+                @I18n.T("dotplot.hide100")
+            </label>
+
+            <div class="stats" style="display: flex; gap: 0.5rem;">
+                <span class="tag">@_modules.Count @I18n.T("dotplot.modules")</span>
+                <span class="tag">@_filteredData.Count @I18n.T("dotplot.filesCount")</span>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_expandedModule) || _hasZoomed || HasActiveFilters())
+            {
+                <button class="reset-btn" @onclick="ResetAll" title="@I18n.T("dotplot.resetAll")">
+                    @I18n.T("dotplot.resetAll")
+                </button>
+            }
+        </div>
+    </div>
+
+    <div style="flex: 1; display: flex; gap: 1rem; min-height: 0;">
+        <!-- Chart Area -->
+        <div style="flex: 1; position: relative; border: 1px solid var(--border-color); border-radius: 0.5rem; background: var(--bg-color);">
+            <div @ref="_container" style="width: 100%; height: 100%;"></div>
+
+            <!-- Legend -->
+            <div class="legend-box">
+                <div style="font-weight: 600; margin-bottom: 4px;">@I18n.T("dotplot.legend")</div>
+                <div style="display: flex; gap: 12px;">
+                    <span><span class="legend-dot" style="background: rgba(16, 185, 129, 0.7);"></span>≥80%</span>
+                    <span><span class="legend-dot" style="background: rgba(245, 158, 11, 0.7);"></span>50-79%</span>
+                    <span><span class="legend-dot" style="background: rgba(239, 68, 68, 0.7);"></span>&lt;50%</span>
+                </div>
+                <div style="margin-top: 4px; color: var(--text-muted);">
+                    <span class="legend-dot" style="border: 2px dashed var(--border-color); background: transparent;"></span>@I18n.T("dotplot.moduleAggregated")
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar Details -->
+        <div style="flex: 0 0 300px; overflow-y: auto; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1rem; display: flex; flex-direction: column;">
+            @if (_selectedModule != null)
+            {
+                <!-- Module Info -->
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <span style="font-size: 1.25rem;">📁</span>
+                    <h3 style="font-size: 1rem; font-weight: 600; margin: 0; word-break: break-all;">
+                        @_selectedModule.ModuleName
+                    </h3>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1.5rem;">
+                    <div style="background: var(--card-bg); padding: 0.5rem; border-radius: 0.25rem; text-align: center;">
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">@I18n.T("dotplot.avgCoverage")</div>
+                        <div style="font-weight: 600; font-size: 1.125rem; color: @GetColor(_selectedModule.AvgCoverage)">
+                            @_selectedModule.AvgCoverage.ToString("F1")%
+                        </div>
+                    </div>
+                    <div style="background: var(--card-bg); padding: 0.5rem; border-radius: 0.25rem; text-align: center;">
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">@I18n.T("dotplot.filesCount")</div>
+                        <div style="font-weight: 600; font-size: 1.125rem;">
+                            @_selectedModule.FileCount
+                        </div>
+                    </div>
+                </div>
+
+                <h4 style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">@I18n.T("dotplot.filesInModule")</h4>
+                <div style="display: flex; flex-direction: column; gap: 0.25rem; max-height: 300px; overflow-y: auto;">
+                    @foreach (var file in _selectedModule.Files.OrderByDescending(f => f.TestCount).Take(20))
+                    {
+                        <div class="file-item" style="display: flex; justify-content: space-between; align-items: center; padding: 0.25rem 0.5rem; background: var(--card-bg); border-radius: 0.25rem; font-size: 0.75rem;">
+                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">@file.FileName</span>
+                            <span class="tag" style="margin-left: 0.5rem; color: @GetColor(file.Coverage)">@file.Coverage.ToString("F0")%</span>
+                        </div>
+                    }
+                    @if (_selectedModule.Files.Count > 20)
+                    {
+                        <div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 0.5rem;">
+                            @I18n.T("dotplot.moreFiles", _selectedModule.Files.Count - 20)
+                        </div>
+                    }
+                </div>
+            }
+            else if (_selectedItem != null)
+            {
+                <!-- File Info -->
+                <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; word-break: break-all;">
+                    @_selectedItem.FileName
+                </h3>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1rem; word-break: break-all;">
+                    @_selectedItem.FullPath
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1.5rem;">
+                    <div style="background: var(--card-bg); padding: 0.5rem; border-radius: 0.25rem; text-align: center;">
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">@I18n.T("dotplot.coverage")</div>
+                        <div style="font-weight: 600; font-size: 1.125rem; color: @GetColor(_selectedItem.Coverage)">
+                            @_selectedItem.Coverage.ToString("F1")%
+                        </div>
+                    </div>
+                    <div style="background: var(--card-bg); padding: 0.5rem; border-radius: 0.25rem; text-align: center;">
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">@I18n.T("dotplot.testImpact")</div>
+                        <div style="font-weight: 600; font-size: 1.125rem;">
+                            @_selectedItem.TestCount
+                        </div>
+                    </div>
+                </div>
+
+                <h4 style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">@I18n.T("dotplot.associatedTests")</h4>
+                @if (_selectedItem.Tests.Any())
+                {
+                    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                        @foreach (var test in _selectedItem.Tests)
+                        {
+                            <div class="tag" style="display: block; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                @test
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <p style="color: var(--text-muted); font-size: 0.875rem;">@I18n.T("dotplot.noTests")</p>
+                }
+            }
+            else
+            {
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); text-align: center;">
+                    <svg style="width: 48px; height: 48px; margin-bottom: 1rem; opacity: 0.5;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
+                    </svg>
+                    <p style="margin-bottom: 0.5rem;">@I18n.T("dotplot.selectHint")</p>
+                    <p style="font-size: 0.75rem;">@I18n.T("dotplot.selectHintSub")</p>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .back-btn {
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 0.25rem 0.75rem;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.875rem;
+        margin-right: 0.5rem;
+    }
+    .back-btn:hover {
+        opacity: 0.9;
+    }
+    .reset-btn {
+        background: var(--card-bg);
+        color: var(--text-color);
+        border: 1px solid var(--border-color);
+        padding: 0.25rem 0.75rem;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.875rem;
+    }
+    .reset-btn:hover {
+        background: var(--hover-bg);
+    }
+    .file-item:hover {
+        background: var(--hover-bg) !important;
+    }
+    .filter-group {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.875rem;
+    }
+    .filter-group label {
+        color: var(--text-muted);
+        font-size: 0.75rem;
+    }
+    .filter-group input[type="range"] {
+        accent-color: var(--primary-color);
+    }
+    .filter-group input[type="number"] {
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 0.125rem 0.25rem;
+        font-size: 0.75rem;
+        background: var(--bg-color);
+        color: var(--text-color);
+    }
+    .legend-box {
+        position: absolute;
+        bottom: 60px;
+        left: 60px;
+        background: var(--card-bg);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 11px;
+        box-shadow: 0 2px 8px var(--shadow-color);
+        border: 1px solid var(--border-color);
+    }
+    .legend-dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 4px;
+    }
+</style>
+
+@code {
+    private ElementReference _container;
+    private List<DotPlotItem> _dataPoints = [];
+    private List<DotPlotItem> _filteredData = [];
+    private List<ModuleInfo> _modules = [];
+    private DotPlotItem? _selectedItem;
+    private ModuleInfo? _selectedModule;
+    private string? _expandedModule;
+    private bool _hideFullCoverage = false;
+    private bool _hasZoomed = false;
+    private int _minCoverage = 0;
+    private int _minTestCount = 0;
+    private DotNetObjectReference<DotPlot>? _objRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await DataService.LoadDataAsync();
+
+        var modules = DataService.GetModuleCoverages();
+        _dataPoints = modules
+            .SelectMany(m => m.Files, (m, f) => new DotPlotItem
+            {
+                FileName = f.FileName,
+                FullPath = f.FullPath,
+                Coverage = f.Coverage,
+                TestCount = f.TestCount,
+                ModuleName = m.ModuleName,
+                Tests = f.Tests
+            })
+            .OrderByDescending(x => x.TestCount)
+            .ToList();
+
+        ComputeModules();
+        ApplyFilter();
+
+        I18n.OnLanguageChanged += OnLanguageChanged;
+    }
+
+    private void ComputeModules()
+    {
+        _modules = _dataPoints
+            .GroupBy(x => x.ModuleName)
+            .Select(g => new ModuleInfo
+            {
+                ModuleName = g.Key,
+                FileCount = g.Count(),
+                AvgCoverage = g.Average(x => x.Coverage),
+                AvgTestCount = g.Average(x => x.TestCount),
+                Files = g.ToList()
+            })
+            .OrderByDescending(x => x.FileCount)
+            .ToList();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _objRef = DotNetObjectReference.Create(this);
+            await RenderChart();
+        }
+    }
+
+    private void OnFilterChanged()
+    {
+        ApplyFilter();
+        ComputeModules();
+        _ = RenderChart();
+    }
+
+    private void ApplyFilter()
+    {
+        _filteredData = _dataPoints.Where(x =>
+        {
+            if (_hideFullCoverage && x.Coverage >= 100) return false;
+            if (x.Coverage < _minCoverage) return false;
+            if (x.TestCount < _minTestCount) return false;
+            return true;
+        }).ToList();
+    }
+
+    private bool HasActiveFilters()
+    {
+        return _hideFullCoverage || _minCoverage > 0 || _minTestCount > 0;
+    }
+
+    private async Task ResetAll()
+    {
+        _expandedModule = null;
+        _selectedModule = null;
+        _selectedItem = null;
+        _hasZoomed = false;
+        _hideFullCoverage = false;
+        _minCoverage = 0;
+        _minTestCount = 0;
+
+        ApplyFilter();
+        ComputeModules();
+        await JS.InvokeVoidAsync("dotPlot.resetView");
+        await RenderChart();
+        StateHasChanged();
+    }
+
+    private async Task RenderChart()
+    {
+        if (_filteredData.Count > 0)
+        {
+            await JS.InvokeVoidAsync("dotPlot.init", _container, _filteredData, _objRef);
+        }
+    }
+
+    [JSInvokable]
+    public void OnItemSelected(DotPlotItem item)
+    {
+        _selectedItem = item;
+        _selectedModule = null;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnModuleSelected(string? moduleName)
+    {
+        _expandedModule = moduleName;
+        _selectedItem = null;
+
+        if (!string.IsNullOrEmpty(moduleName))
+        {
+            _selectedModule = _modules.FirstOrDefault(m => m.ModuleName == moduleName);
+        }
+        else
+        {
+            _selectedModule = null;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task GoBack()
+    {
+        _expandedModule = null;
+        _selectedModule = null;
+        _selectedItem = null;
+        await JS.InvokeVoidAsync("dotPlot.resetView");
+        StateHasChanged();
+    }
+
+    private int GetModuleFileCount()
+    {
+        return _modules.FirstOrDefault(m => m.ModuleName == _expandedModule)?.FileCount ?? 0;
+    }
+
+    private string GetColor(double coverage) => coverage switch
+    {
+        >= 80 => "var(--success-color)",
+        >= 50 => "var(--warning-color)",
+        _ => "var(--danger-color)"
+    };
+
+    private void OnLanguageChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        _objRef?.Dispose();
+        I18n.OnLanguageChanged -= OnLanguageChanged;
+    }
+
+    public class DotPlotItem
+    {
+        public string FileName { get; set; } = "";
+        public string FullPath { get; set; } = "";
+        public double Coverage { get; set; }
+        public int TestCount { get; set; }
+        public string ModuleName { get; set; } = "";
+        public List<string> Tests { get; set; } = [];
+
+        public double _x { get; set; }
+        public double _y { get; set; }
+    }
+
+    public class ModuleInfo
+    {
+        public string ModuleName { get; set; } = "";
+        public int FileCount { get; set; }
+        public double AvgCoverage { get; set; }
+        public double AvgTestCount { get; set; }
+        public List<DotPlotItem> Files { get; set; } = [];
+    }
+}
