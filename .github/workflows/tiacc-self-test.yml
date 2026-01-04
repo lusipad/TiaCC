@@ -21,73 +21,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
+      - name: Install .NET 10 (Daily)
+        run: |
+          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel 10.0 --quality daily
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
 
       - name: Restore dependencies
         working-directory: tools-dotnet
         run: dotnet restore
 
-      - name: Build solution
+      - name: Build impact map (dogfooding)
         working-directory: tools-dotnet
-        run: dotnet build -c Release --no-restore
-
-      - name: Generate coverage for each test class
-        working-directory: tools-dotnet
-        run: |
-          mkdir -p tiacc-data/coverage
-
-          echo "Running tests with coverage..."
-          TEST_CLASSES=("CoverageParserTests" "DatabaseServiceTests" "GitServiceTests" "SymbolExtractorTests" "ExportServiceTests" "TiaCCConfigTests" "CoverageDataServiceTests")
-
-          for TEST_CLASS in "${TEST_CLASSES[@]}"; do
-            echo ""
-            echo "Running $TEST_CLASS..."
-            rm -rf "tiacc-data/coverage/$TEST_CLASS"
-            mkdir -p "tiacc-data/coverage/$TEST_CLASS"
-
-            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj \
-              --no-build -c Release \
-              --filter "FullyQualifiedName~$TEST_CLASS" \
-              --collect:"XPlat Code Coverage" \
-              --results-directory "tiacc-data/coverage/$TEST_CLASS" \
-              -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura || true
-
-            # Copy coverage file with test name
-            COVERAGE_FILE=$(find "tiacc-data/coverage/$TEST_CLASS" -name "coverage.cobertura.xml" -type f | head -1)
-            if [ -n "$COVERAGE_FILE" ]; then
-              cp "$COVERAGE_FILE" "tiacc-data/coverage/test_${TEST_CLASS}.cobertura.xml"
-              echo "Coverage saved for $TEST_CLASS"
-            fi
-          done
-
-          echo ""
-          echo "Generated coverage files:"
-          ls -1 tiacc-data/coverage/*.xml 2>/dev/null || echo "No coverage files found"
-
-      - name: Build test impact mapping database
-        working-directory: tools-dotnet
-        run: |
-          # Initialize database
-          dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- init --db tiacc-data/impact_map.db
-
-          # Map each coverage file
-          for COVERAGE_FILE in tiacc-data/coverage/test_*.cobertura.xml; do
-            if [ -f "$COVERAGE_FILE" ]; then
-              TEST_NAME=$(basename "$COVERAGE_FILE" .cobertura.xml | sed 's/^test_//')
-              echo "Mapping coverage for $TEST_NAME..."
-              dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- map \
-                --db tiacc-data/impact_map.db \
-                --coverage "$COVERAGE_FILE" \
-                --test "$TEST_NAME" \
-                --base-dir . || true
-            fi
-          done
-
-          # Show statistics
-          dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- stats --db tiacc-data/impact_map.db
+        run: bash scripts/build-self-test-map.sh
 
       - name: Upload .NET impact map as artifact
         uses: actions/upload-artifact@v4
@@ -108,10 +56,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
+      - name: Install .NET 10 (Daily)
+        run: |
+          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel 10.0 --quality daily
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
 
       - name: Restore and build
         working-directory: tools-dotnet
@@ -186,13 +137,81 @@ jobs:
             FILTER="${{ steps.affected-tests.outputs.test_filter }}"
             # Convert space-separated list to filter expression
             FILTER_EXPR=$(echo "$FILTER" | tr ' ' '\n' | sed 's/.*/FullyQualifiedName~&/' | tr '\n' '|' | sed 's/|$//')
-            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --filter "$FILTER_EXPR"
+            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --no-build -c Release --filter "$FILTER_EXPR"
           else
             echo "Running ALL .NET tests..."
-            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj
+            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --no-build -c Release
           fi
 
-  # Job 3: 验证 .NET dogfooding 脚本
+  # Job 3: 代码覆盖率检查（不阻断）
+  dotnet-coverage-gate:
+    name: .NET Coverage Check (Non-blocking)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10 (Daily)
+        run: |
+          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel 10.0 --quality daily
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
+
+      - name: Restore and build
+        working-directory: tools-dotnet
+        run: |
+          dotnet restore
+          dotnet build -c Release --no-restore
+
+      - name: Run tests with coverage (Cobertura)
+        working-directory: tools-dotnet
+        run: |
+          rm -rf tiacc-data/coverage-gate
+          mkdir -p tiacc-data/coverage-gate
+
+          dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj \
+            --no-build -c Release \
+            --collect:"XPlat Code Coverage" \
+            --results-directory tiacc-data/coverage-gate \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+          COVERAGE_FILE=$(find tiacc-data/coverage-gate -name "coverage.cobertura.xml" -type f | head -1)
+          if [ -z "$COVERAGE_FILE" ]; then
+            echo "Coverage file not found"
+            exit 1
+          fi
+
+          python3 - <<PY
+import sys
+import xml.etree.ElementTree as ET
+
+path = "$COVERAGE_FILE"
+threshold = 0.90
+
+root = ET.parse(path).getroot()
+line_rate = float(root.attrib.get("line-rate", "0"))
+branch_rate = float(root.attrib.get("branch-rate", "0"))
+
+print(f"Coverage (line-rate):   {line_rate*100:.2f}%")
+print(f"Coverage (branch-rate): {branch_rate*100:.2f}%")
+print(f"Threshold (line-rate):  {threshold*100:.0f}%")
+
+if line_rate < threshold:
+    print(f"::warning title=Coverage below threshold::line-rate {line_rate*100:.2f}% is below {threshold*100:.0f}% (non-blocking)")
+PY
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiacc-dotnet-coverage
+          path: tools-dotnet/tiacc-data/coverage-gate/
+          retention-days: 7
+
+  # Job 4: 验证 .NET dogfooding 脚本
   dotnet-verify-demo:
     name: Verify .NET Dogfooding Script
     runs-on: ubuntu-latest
@@ -201,10 +220,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
+      - name: Install .NET 10 (Daily)
+        run: |
+          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel 10.0 --quality daily
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+          echo "$HOME/.dotnet" >> $GITHUB_PATH
 
       - name: Run .NET dogfooding script
         working-directory: tools-dotnet

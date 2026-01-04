@@ -325,4 +325,38 @@ public delegate void MyEventHandler(object sender, EventArgs e);";
         // Assert
         Assert.Empty(symbols);
     }
+
+    [Fact]
+    public async Task ExtractFromDirectoryAsync_FindsFilesAndNormalizesPaths()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"tiacc_symbols_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var srcDir = Path.Combine(tempDir, "src");
+            Directory.CreateDirectory(srcDir);
+
+            var filePath = Path.Combine(srcDir, "Foo.cs");
+            File.WriteAllText(filePath, """
+                namespace MyApp;
+
+                public class Foo
+                {
+                    public void Bar() { }
+                }
+                """);
+
+            var symbols = await _extractor.ExtractFromDirectoryAsync(tempDir, ["*.cs"]);
+
+            Assert.NotEmpty(symbols);
+            Assert.Contains(symbols, s => s.FilePath == "src/Foo.cs");
+            Assert.Contains(symbols, s => s.SymbolType == "class" && s.Name == "MyApp.Foo");
+            Assert.Contains(symbols, s => s.SymbolType == "method" && s.Name == "MyApp.Foo.Bar");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

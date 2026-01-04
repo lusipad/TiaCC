@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using TiaCC.Core.Services;
 using Xunit;
 
@@ -17,8 +18,23 @@ public class DatabaseServiceTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, true);
+        // Clear connection pool to release database file handles
+        SqliteConnection.ClearAllPools();
+        
+        // Retry deletion with a short delay if the file is still locked
+        for (int i = 0; i < 3; i++)
+        {
+            try
+            {
+                if (Directory.Exists(_testDir))
+                    Directory.Delete(_testDir, true);
+                break;
+            }
+            catch (IOException) when (i < 2)
+            {
+                Thread.Sleep(100);
+            }
+        }
         GC.SuppressFinalize(this);
     }
 

@@ -251,6 +251,83 @@ public class CoverageParserTests : IDisposable
 
     #endregion
 
+    #region LLVM JSON Tests
+
+    [Fact]
+    public void ParseLlvmJson_ValidFile_ReturnsCoverageData()
+    {
+        var json = """
+            {
+              "data": [
+                {
+                  "files": [
+                    {
+                      "filename": "/home/user/project/src/a.cpp",
+                      "summary": { "lines": { "covered": 3, "count": 5 } }
+                    },
+                    {
+                      "filename": "/home/user/project/src/zero.cpp",
+                      "summary": { "lines": { "covered": 0, "count": 0 } }
+                    }
+                  ],
+                  "functions": [
+                    {
+                      "name": "foo",
+                      "filenames": ["/home/user/project/src/a.cpp"],
+                      "regions": [[10, 0, 12], [20, 0, 25]],
+                      "count": 2
+                    },
+                    {
+                      "name": "bar_no_regions",
+                      "filenames": ["/home/user/project/src/a.cpp"],
+                      "regions": [],
+                      "count": 1
+                    },
+                    {
+                      "name": "baz_no_filenames",
+                      "filenames": [],
+                      "regions": [[1, 0, 1]],
+                      "count": 1
+                    },
+                    {
+                      "name": "zero_hits",
+                      "filenames": ["/home/user/project/src/a.cpp"],
+                      "regions": [[30, 0, 31]],
+                      "count": 0
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+        var filePath = Path.Combine(_testDir, "llvm.cov.json");
+        File.WriteAllText(filePath, json);
+
+        var result = CoverageParser.ParseLlvmJson(filePath, "/home/user/project");
+
+        Assert.Equal(2, result.Files.Count);
+        Assert.True(result.Files.TryGetValue("src/a.cpp", out var aFile));
+        Assert.Equal(3, aFile.CoveredLines);
+        Assert.Equal(5, aFile.TotalLines);
+        Assert.Equal(60, aFile.CoveragePercent);
+
+        Assert.True(result.Files.TryGetValue("src/zero.cpp", out var zeroFile));
+        Assert.Equal(0, zeroFile.TotalLines);
+        Assert.Equal(0, zeroFile.CoveragePercent);
+
+        Assert.Equal(2, result.Functions.Count);
+        var foo = result.Functions.Single(f => f.Name == "foo");
+        Assert.Equal("src/a.cpp", foo.FilePath);
+        Assert.Equal(10, foo.StartLine);
+        Assert.Equal(25, foo.EndLine);
+        Assert.True(foo.IsCovered);
+
+        var zeroHits = result.Functions.Single(f => f.Name == "zero_hits");
+        Assert.False(zeroHits.IsCovered);
+    }
+
+    #endregion
+
     #region coverage.py JSON Tests
 
     [Fact]
@@ -325,9 +402,108 @@ public class CoverageParserTests : IDisposable
     }
 
     [Fact]
+    public void Parse_GenericJson_WithLlvmData_AutoDetects()
+    {
+        var json = """
+            {
+              "data": [
+                {
+                  "files": [
+                    {
+                      "filename": "/home/user/project/src/a.cpp",
+                      "summary": { "lines": { "covered": 1, "count": 2 } }
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+        var filePath = Path.Combine(_testDir, "llvm_generic.json");
+        File.WriteAllText(filePath, json);
+
+        var result = CoverageParser.Parse(filePath, "/home/user/project");
+
+        Assert.Single(result.Files);
+        Assert.Contains("src/a.cpp", result.Files.Keys);
+    }
+
+    [Fact]
+    public void Parse_GenericJson_WithCoveragePyData_AutoDetects()
+    {
+        var json = """
+            {
+              "meta": { "version": "7.0" },
+              "files": {
+                "/home/user/project/src/a.py": {
+                  "executed_lines": [1],
+                  "missing_lines": [2]
+                }
+              }
+            }
+            """;
+        var filePath = Path.Combine(_testDir, "coveragepy_generic.json");
+        File.WriteAllText(filePath, json);
+
+        var result = CoverageParser.Parse(filePath, "/home/user/project");
+
+        Assert.Single(result.Files);
+        Assert.Contains("src/a.py", result.Files.Keys);
+    }
+
+    [Fact]
+    public void Parse_GenericJson_WithIstanbulData_AutoDetects()
+    {
+        var json = """
+            {
+              "/home/user/project/src/index.js": {
+                "s": { "0": 1, "1": 0 },
+                "f": { "0": 1 },
+                "fnMap": {
+                  "0": { "name": "main", "decl": { "start": { "line": 1 }, "end": { "line": 2 } } }
+                }
+              }
+            }
+            """;
+        // Name must NOT contain "istanbul" to exercise ParseGenericJson detection.
+        var filePath = Path.Combine(_testDir, "generic_report.json");
+        File.WriteAllText(filePath, json);
+
+        var result = CoverageParser.Parse(filePath, "/home/user/project");
+
+        Assert.Single(result.Files);
+        Assert.Contains("src/index.js", result.Files.Keys);
+    }
+
+    [Fact]
+    public void Parse_GenericJson_DefaultsToCoverlet()
+    {
+        var json = """
+            {
+              "MyAssembly.dll": {
+                "src/Calculator.cs": {
+                  "Calculator.Add(int, int)": {
+                    "Lines": {
+                      "10": 1,
+                      "11": 0
+                    }
+                  }
+                }
+              }
+            }
+            """;
+        var filePath = Path.Combine(_testDir, "coverlet_generic.json");
+        File.WriteAllText(filePath, json);
+
+        var result = CoverageParser.Parse(filePath);
+
+        Assert.Single(result.Files);
+        Assert.Contains("src/Calculator.cs", result.Files.Keys);
+    }
+
+    [Fact]
     public void Parse_UnsupportedFormat_ThrowsException()
     {
-        var filePath = Path.Combine(_testDir, "coverage.unsupported");
+        var filePath = Path.Combine(_testDir, "coverage.unsupported");    
         File.WriteAllText(filePath, "invalid");
 
         Assert.Throws<NotSupportedException>(() => CoverageParser.Parse(filePath));

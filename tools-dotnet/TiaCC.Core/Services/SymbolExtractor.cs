@@ -163,9 +163,10 @@ public class SymbolExtractor
                 });
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // If parsing fails, return empty list
+            // Log warning about parsing failure but continue - parsing errors shouldn't stop the process
+            Console.Error.WriteLine($"[TiaCC] Warning: Failed to parse symbols from '{filePath}': {ex.Message}");
         }
 
         return symbols;

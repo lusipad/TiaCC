@@ -103,7 +103,7 @@ Click any source file to see function-level coverage details:
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/your-org/TiaCC.git
+git clone https://github.com/YourUsername/TiaCC.git  # Replace with your fork
 cd TiaCC
 
 # 2. Start Dashboard (with sample data)

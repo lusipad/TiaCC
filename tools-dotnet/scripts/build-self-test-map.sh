@@ -2,13 +2,14 @@
 # TiaCC .NET Dogfooding Script
 # Builds test impact map for TiaCC's own test suite
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="$PROJECT_DIR/tiacc-data"
 COVERAGE_DIR="$DATA_DIR/coverage"
 DB_PATH="$DATA_DIR/impact_map.db"
+TEST_PROJECT="$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
 
 echo "=== TiaCC .NET Self-Testing (Dogfooding) ==="
 echo "Project: $PROJECT_DIR"
@@ -25,80 +26,92 @@ dotnet build "$PROJECT_DIR/TiaCC.sln" -c Release
 # Initialize the database
 echo ""
 echo "Initializing database..."
-dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" -- init --db "$DB_PATH"
+dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- init --db "$DB_PATH"
 
-# Find all test classes
+# Discover test classes (Namespace.Class) from dotnet test --list-tests output.
 echo ""
-echo "Discovering tests..."
-TEST_PROJECT="$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
+echo "Discovering test classes..."
+TEST_CLASSES=$(dotnet test "$TEST_PROJECT" --no-build -c Release --list-tests 2>/dev/null \
+  | sed -E 's/^[[:space:]]+//; s/\r$//' \
+  | grep -E '^[A-Za-z0-9_.]+$' \
+  | sed -E 's/\.[^.]+$//' \
+  | sort -u || true)
 
-# Get list of test methods using dotnet test --list-tests
-TEST_LIST=$(dotnet test "$TEST_PROJECT" -c Release --list-tests 2>/dev/null | grep -E "^\s+\w+Tests\.\w+" || true)
+if [ -z "$TEST_CLASSES" ]; then
+  echo "No tests found via --list-tests. Running all tests to generate coverage..."
 
-if [ -z "$TEST_LIST" ]; then
-    echo "No tests found. Running all tests to generate coverage..."
+  rm -rf "$COVERAGE_DIR/all"
+  mkdir -p "$COVERAGE_DIR/all"
 
-    # Run all tests with coverage
-    dotnet test "$TEST_PROJECT" \
-        -c Release \
-        --collect:"XPlat Code Coverage" \
-        --results-directory "$COVERAGE_DIR" \
-        -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+  dotnet test "$TEST_PROJECT" \
+    --no-build -c Release \
+    --collect:"XPlat Code Coverage" \
+    --results-directory "$COVERAGE_DIR/all" \
+    -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
-    # Find and process coverage file
-    COVERAGE_FILE=$(find "$COVERAGE_DIR" -name "coverage.cobertura.xml" -type f | head -1)
-    if [ -n "$COVERAGE_FILE" ]; then
-        echo "Mapping coverage from: $COVERAGE_FILE"
-        dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" -- map \
-            --db "$DB_PATH" \
-            --coverage "$COVERAGE_FILE" \
-            --test "TiaCC.Core.Tests" \
-            --base-dir "$PROJECT_DIR"
-    fi
+  COVERAGE_FILE=$(find "$COVERAGE_DIR/all" -name "coverage.cobertura.xml" -type f | head -1)
+  if [ -z "$COVERAGE_FILE" ]; then
+    echo "Coverage file not found"
+    exit 1
+  fi
+
+  echo "Mapping coverage from: $COVERAGE_FILE"
+  dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- map \
+    --db "$DB_PATH" \
+    --coverage "$COVERAGE_FILE" \
+    --test "TiaCC.Core.Tests" \
+    --base-dir "$PROJECT_DIR"
 else
-    echo "Found tests, running individually..."
+  echo "Found $(echo "$TEST_CLASSES" | wc -l | tr -d ' ') test classes, running individually..."
 
-    # Run each test class separately to get independent coverage
-    for TEST_CLASS in CoverageParserTests DatabaseServiceTests GitServiceTests SymbolExtractorTests ExportServiceTests TiaCCConfigTests CoverageDataServiceTests; do
-        echo ""
-        echo "Running: $TEST_CLASS"
+  rm -rf "$COVERAGE_DIR/by-class"
+  mkdir -p "$COVERAGE_DIR/by-class"
 
-        # Clean previous coverage
-        rm -rf "$COVERAGE_DIR/$TEST_CLASS"
-        mkdir -p "$COVERAGE_DIR/$TEST_CLASS"
+  while IFS= read -r TEST_CLASS; do
+    [ -z "$TEST_CLASS" ] && continue
 
-        # Run test class with coverage
-        dotnet test "$TEST_PROJECT" \
-            -c Release \
-            --filter "FullyQualifiedName~$TEST_CLASS" \
-            --collect:"XPlat Code Coverage" \
-            --results-directory "$COVERAGE_DIR/$TEST_CLASS" \
-            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura || true
+    echo ""
+    echo "Running: $TEST_CLASS"
 
-        # Find and process coverage file
-        COVERAGE_FILE=$(find "$COVERAGE_DIR/$TEST_CLASS" -name "coverage.cobertura.xml" -type f | head -1)
-        if [ -n "$COVERAGE_FILE" ]; then
-            echo "Mapping coverage for $TEST_CLASS..."
-            dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" -- map \
-                --db "$DB_PATH" \
-                --coverage "$COVERAGE_FILE" \
-                --test "$TEST_CLASS" \
-                --base-dir "$PROJECT_DIR"
-        fi
-    done
+    CLASS_DIR="$COVERAGE_DIR/by-class/$TEST_CLASS"
+    rm -rf "$CLASS_DIR"
+    mkdir -p "$CLASS_DIR"
+
+    dotnet test "$TEST_PROJECT" \
+      --no-build -c Release \
+      --filter "FullyQualifiedName~$TEST_CLASS" \
+      --collect:"XPlat Code Coverage" \
+      --results-directory "$CLASS_DIR" \
+      -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+    COVERAGE_FILE=$(find "$CLASS_DIR" -name "coverage.cobertura.xml" -type f | head -1)
+    if [ -z "$COVERAGE_FILE" ]; then
+      echo "Coverage file not found for $TEST_CLASS"
+      exit 1
+    fi
+
+    cp "$COVERAGE_FILE" "$COVERAGE_DIR/test_${TEST_CLASS}.cobertura.xml"
+
+    echo "Mapping coverage for $TEST_CLASS..."
+    dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- map \
+      --db "$DB_PATH" \
+      --coverage "$COVERAGE_FILE" \
+      --test "$TEST_CLASS" \
+      --base-dir "$PROJECT_DIR"
+  done <<< "$TEST_CLASSES"
 fi
 
 # Show statistics
 echo ""
 echo "=== Impact Map Statistics ==="
-dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" -- stats --db "$DB_PATH"
+dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- stats --db "$DB_PATH"
 
 # Export for dashboard
 echo ""
 echo "Exporting for dashboard..."
-dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" -- export \
-    --db "$DB_PATH" \
-    --output "$PROJECT_DIR/TiaCC.Dashboard/wwwroot/data"
+dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- export \
+  --db "$DB_PATH" \
+  --output "$PROJECT_DIR/TiaCC.Dashboard/wwwroot/data"
 
 echo ""
 echo "=== Done ==="

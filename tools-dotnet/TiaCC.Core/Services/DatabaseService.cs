@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using TiaCC.Core.Data;
 using TiaCC.Core.Models;
 
@@ -46,10 +47,21 @@ public class DatabaseService : IDisposable, IAsyncDisposable
         var existing = await GetSourceFileAsync(filePath, cancellationToken);
         if (existing != null) return existing;
 
-        var sourceFile = new SourceFile { FilePath = filePath };
-        _context.SourceFiles.Add(sourceFile);
-        await _context.SaveChangesAsync(cancellationToken);
-        return sourceFile;
+        try
+        {
+            var sourceFile = new SourceFile { FilePath = filePath };
+            _context.SourceFiles.Add(sourceFile);
+            await _context.SaveChangesAsync(cancellationToken);
+            return sourceFile;
+        }
+        catch (DbUpdateException)
+        {
+            // Handle race condition where another thread inserted the same record
+            _context.ChangeTracker.Clear();
+            var concurrentInsert = await GetSourceFileAsync(filePath, cancellationToken);
+            if (concurrentInsert != null) return concurrentInsert;
+            throw;
+        }
     }
 
     public async Task<List<SourceFile>> GetAllSourceFilesAsync(CancellationToken cancellationToken = default)
@@ -72,10 +84,21 @@ public class DatabaseService : IDisposable, IAsyncDisposable
         var existing = await GetTestScriptAsync(scriptPath, cancellationToken);
         if (existing != null) return existing;
 
-        var testScript = new TestScript { ScriptPath = scriptPath };
-        _context.TestScripts.Add(testScript);
-        await _context.SaveChangesAsync(cancellationToken);
-        return testScript;
+        try
+        {
+            var testScript = new TestScript { ScriptPath = scriptPath };
+            _context.TestScripts.Add(testScript);
+            await _context.SaveChangesAsync(cancellationToken);
+            return testScript;
+        }
+        catch (DbUpdateException)
+        {
+            // Handle race condition where another thread inserted the same record
+            _context.ChangeTracker.Clear();
+            var concurrentInsert = await GetTestScriptAsync(scriptPath, cancellationToken);
+            if (concurrentInsert != null) return concurrentInsert;
+            throw;
+        }
     }
 
     public async Task<List<TestScript>> GetAllTestScriptsAsync(CancellationToken cancellationToken = default)

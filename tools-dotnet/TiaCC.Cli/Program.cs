@@ -7,6 +7,12 @@ namespace TiaCC.Cli;
 
 class Program
 {
+    // Constants for configuration and display
+    private const int MaxDisplayedFiles = 10;
+    private const double HighCoverageThreshold = 80.0;
+    private const double MediumCoverageThreshold = 50.0;
+    private const int DefaultSplitGroupCount = 4;
+    private const int MinSplitGroupCount = 1;
     static async Task<int> Main(string[] args)
     {
         var rootCommand = new RootCommand("TiaCC - Test Impact Analysis for C/C++");
@@ -174,8 +180,8 @@ class Program
         var splitCommand = new Command("split", "Split tests into groups for parallel execution");
         var splitCountOption = new Option<int>(
             aliases: ["--count", "-n"],
-            description: "Number of groups to split into",
-            getDefaultValue: () => 4);
+            description: $"Number of groups to split into (minimum: {MinSplitGroupCount})",
+            getDefaultValue: () => DefaultSplitGroupCount);
         var splitIndexOption = new Option<int?>(
             aliases: ["--index", "-i"],
             description: "Return only the Nth group (0-based)");
@@ -529,7 +535,9 @@ class Program
 
             foreach (var dir in dirCoverage)
             {
-                var color = dir.AvgCoverage >= 80 ? "green" : dir.AvgCoverage >= 50 ? "yellow" : "red";
+                var color = dir.AvgCoverage >= HighCoverageThreshold ? "green" 
+                          : dir.AvgCoverage >= MediumCoverageThreshold ? "yellow" 
+                          : "red";
                 dirTable.AddRow(
                     dir.Directory,
                     dir.FileCount.ToString(),
@@ -591,13 +599,13 @@ class Program
         }
 
         AnsiConsole.MarkupLine($"[cyan]Changed files ({changedFiles.Count}):[/]");
-        foreach (var file in changedFiles.Take(10))
+        foreach (var file in changedFiles.Take(MaxDisplayedFiles))
         {
             AnsiConsole.MarkupLine($"  [dim]{file}[/]");
         }
-        if (changedFiles.Count > 10)
+        if (changedFiles.Count > MaxDisplayedFiles)
         {
-            AnsiConsole.MarkupLine($"  [dim]... and {changedFiles.Count - 10} more[/]");
+            AnsiConsole.MarkupLine($"  [dim]... and {changedFiles.Count - MaxDisplayedFiles} more[/]");
         }
 
         await using var db = new DatabaseService(dbPath);
@@ -895,9 +903,9 @@ class Program
             throw new FileNotFoundException("Database not found. Run 'init' and 'map' first.", dbPath);
         }
 
-        if (groupCount < 1)
+        if (groupCount < MinSplitGroupCount)
         {
-            throw new ArgumentException("Group count must be at least 1.");
+            throw new ArgumentException($"Group count must be at least {MinSplitGroupCount}.");
         }
 
         var gitService = new GitService();

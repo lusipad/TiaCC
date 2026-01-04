@@ -102,7 +102,7 @@ TiaCC 提供美观的 Web Dashboard，让你**可视化**理解代码与测试�
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-org/TiaCC.git
+git clone https://github.com/YourUsername/TiaCC.git  # 替换为实际仓库地址
 cd TiaCC
 
 # 2. 启动 Dashboard（使用示例数据）

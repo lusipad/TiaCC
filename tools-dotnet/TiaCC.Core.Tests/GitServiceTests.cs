@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TiaCC.Core.Services;
 using Xunit;
 
@@ -8,209 +9,214 @@ namespace TiaCC.Core.Tests;
 /// </summary>
 public class GitServiceTests
 {
-    [Fact]
-    public void IsGitRepository_InGitRepo_ReturnsTrue()
+    private sealed class TempGitRepo : IDisposable
     {
-        // Arrange
-        var gitService = new GitService();
+        public string Root { get; } = Path.Combine(Path.GetTempPath(), $"tiacc_git_{Guid.NewGuid():N}");
 
-        // Act & Assert
-        // This test assumes it's run from within the TiaCC repository
-        Assert.True(gitService.IsGitRepository());
-    }
-
-    [Fact]
-    public void GetRepositoryRoot_InGitRepo_ReturnsPath()
-    {
-        // Arrange
-        var gitService = new GitService();
-
-        // Act
-        var root = gitService.GetRepositoryRoot();
-
-        // Assert
-        Assert.NotNull(root);
-        Assert.True(Directory.Exists(root));
-    }
-
-    [Fact]
-    public void GetCurrentBranch_ReturnsNonEmptyString()
-    {
-        // Arrange
-        var gitService = new GitService();
-
-        // Act
-        var branch = gitService.GetCurrentBranch();
-
-        // Assert
-        Assert.NotNull(branch);
-        Assert.NotEmpty(branch);
-    }
-
-    [Fact]
-    public void GetCurrentCommit_ReturnsValidHash()
-    {
-        // Arrange
-        var gitService = new GitService();
-
-        // Act
-        var commit = gitService.GetCurrentCommit();
-
-        // Assert
-        Assert.NotNull(commit);
-        Assert.Matches("^[a-f0-9]{40}$", commit);
-    }
-
-    [Fact]
-    public void RefExists_WithValidRef_ReturnsTrue()
-    {
-        // Arrange
-        var gitService = new GitService();
-
-        // Act - HEAD always exists
-        var exists = gitService.RefExists("HEAD");
-
-        // Assert
-        Assert.True(exists);
-    }
-
-    [Fact]
-    public void RefExists_WithInvalidRef_ReturnsFalse()
-    {
-        // Arrange
-        var gitService = new GitService();
-
-        // Act
-        var exists = gitService.RefExists("nonexistent-ref-that-should-not-exist-12345");
-
-        // Assert
-        Assert.False(exists);
-    }
-
-    [Fact]
-    public void GetDefaultBranch_ReturnsValidBranch()
-    {
-        // Arrange
-        var gitService = new GitService();
-
-        // Act
-        var defaultBranch = gitService.GetDefaultBranch();
-
-        // Assert
-        Assert.NotNull(defaultBranch);
-        Assert.Contains(defaultBranch, new[] { "main", "master", "origin/main", "origin/master" });
-    }
-
-    [Fact]
-    public void GetUncommittedChanges_ReturnsListWithoutError()
-    {
-        // Arrange
-        var gitService = new GitService();
-
-        // Act
-        var changes = gitService.GetUncommittedChanges();
-
-        // Assert
-        Assert.NotNull(changes);
-        // List can be empty if no uncommitted changes, that's fine
-    }
-
-    [Fact]
-    public void GetChangedFilesInLastCommits_ReturnsListWithoutError()
-    {
-        // Arrange
-        var gitService = new GitService();
-
-        // Act
-        var changes = gitService.GetChangedFilesInLastCommits(1);
-
-        // Assert
-        Assert.NotNull(changes);
-        // Should have at least some files in the last commit
-    }
-
-    [Fact]
-    public void GetMergeBase_WithSameBranch_ReturnsCommit()
-    {
-        // Arrange
-        var gitService = new GitService();
-        var branch = gitService.GetCurrentBranch();
-        if (branch == null) return; // Skip if can't get current branch
-
-        // Check if we have at least 2 commits (HEAD~1 exists)
-        // This may not be true in shallow clone CI environments
-        var parentCheck = gitService.GetMergeBase("HEAD", "HEAD");
-        if (parentCheck == null) return; // Skip if git operations don't work
-
-        // Act
-        var mergeBase = gitService.GetMergeBase("HEAD", "HEAD~1");
-
-        // Assert - may be null in shallow clone, so we only assert format if not null
-        if (mergeBase != null)
+        public TempGitRepo()
         {
-            Assert.Matches("^[a-f0-9]{40}$", mergeBase);
+            Directory.CreateDirectory(Root);
+
+            RunGit("init", "-b", "main");
+            RunGit("config", "user.email", "tiacc-tests@example.com");
+            RunGit("config", "user.name", "TiaCC Tests");
+        }
+
+        public void WriteFile(string relativePath, string contents)
+        {
+            var fullPath = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            File.WriteAllText(fullPath, contents);
+        }
+
+        public void AddAll() => RunGit("add", "-A");
+
+        public string Commit(string message)
+        {
+            AddAll();
+            RunGit("commit", "-m", message);
+            return RunGit("rev-parse", "HEAD").Trim();
+        }
+
+        public void CheckoutNewBranch(string branch, string startPoint) => RunGit("checkout", "-b", branch, startPoint);
+        public void Checkout(string branch) => RunGit("checkout", branch);
+
+        public string RunGit(params string[] args) => RunGitProcess(Root, args);
+
+        public void Dispose()
+        {
+            try
+            {
+                Directory.Delete(Root, recursive: true);
+            }
+            catch
+            {
+                // Best-effort cleanup for CI/Windows file locking flakiness.
+            }
         }
     }
 
-    [Fact]
-    public void GetChangedFiles_WithValidRefs_ReturnsFiles()
+    private static string RunGitProcess(string workingDirectory, params string[] args)
     {
-        // Arrange
-        var gitService = new GitService();
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
 
-        // Act - compare last commit to its parent
-        var files = gitService.GetChangedFiles("HEAD~1", "HEAD");
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
 
-        // Assert
-        Assert.NotNull(files);
-        // Should have files changed in the last commit
+        using var process = Process.Start(startInfo);
+        if (process == null)
+        {
+            throw new InvalidOperationException("Failed to start git process.");
+        }
+
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"git {string.Join(" ", args)} failed: {error}");
+        }
+
+        return output;
     }
 
     [Fact]
-    public void GitService_WithNonGitDirectory_IsGitRepositoryReturnsFalse()
+    public void RepositoryBasics_WorkInFreshRepo()
     {
-        // Arrange - use temp directory which shouldn't be a git repo
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        using var repo = new TempGitRepo();
+        var service = new GitService(repo.Root);
+
+        Assert.True(service.IsGitRepository());
+
+        var root = service.GetRepositoryRoot();
+        Assert.NotNull(root);
+        Assert.Equal(Path.GetFullPath(repo.Root), Path.GetFullPath(root));
+
+        Assert.Null(service.GetCurrentBranch()); // empty repo: no HEAD commit yet
+        Assert.Null(service.GetCurrentCommit()); // no commits yet
+
+        repo.WriteFile("src/a.txt", "one\n");
+        var firstCommit = repo.Commit("initial");
+
+        Assert.Equal("main", service.GetCurrentBranch());
+
+        repo.WriteFile("src/a.txt", "two\n");
+        var secondCommit = repo.Commit("second");
+
+        var currentCommit = service.GetCurrentCommit();
+        Assert.NotNull(currentCommit);
+        Assert.Matches("^[a-f0-9]{40}$", currentCommit);
+        Assert.Equal(secondCommit, currentCommit);
+        Assert.NotEqual(firstCommit, currentCommit);
+    }
+
+    [Fact]
+    public void GetUncommittedChanges_IncludesUnstagedStagedAndUntracked()
+    {
+        using var repo = new TempGitRepo();
+        repo.WriteFile("src/a.txt", "one\n");
+        repo.Commit("initial");
+
+        // Unstaged modification
+        repo.WriteFile("src/a.txt", "two\n");
+
+        // Staged new file
+        repo.WriteFile("src/b.txt", "staged\n");
+        repo.RunGit("add", "src/b.txt");
+
+        // Untracked file
+        repo.WriteFile("src/c.txt", "untracked\n");
+
+        var service = new GitService(repo.Root);
+        var changes = service.GetUncommittedChanges();
+
+        Assert.Contains("src/a.txt", changes);
+        Assert.Contains("src/b.txt", changes);
+        Assert.Contains("src/c.txt", changes);
+    }
+
+    [Fact]
+    public void GetChangedFiles_And_GetChangedLines_WorkBetweenCommits()
+    {
+        using var repo = new TempGitRepo();
+        repo.WriteFile("src/a.txt", "line1\nline2\n");
+        var baseCommit = repo.Commit("base");
+
+        repo.WriteFile("src/a.txt", "line1-mod\nline2\nline3\n");
+        var headCommit = repo.Commit("change");
+
+        var service = new GitService(repo.Root);
+
+        var changedFiles = service.GetChangedFiles(baseCommit, headCommit);
+        Assert.Contains("src/a.txt", changedFiles);
+
+        var lastCommitFiles = service.GetChangedFilesInLastCommits(1);
+        Assert.Contains("src/a.txt", lastCommitFiles);
+
+        var changedLines = service.GetChangedLines("src/a.txt", baseCommit, headCommit);
+        Assert.NotEmpty(changedLines);
+        Assert.Contains(changedLines, l => l.ChangeType == ChangeType.Added);
+        Assert.Contains(changedLines, l => l.ChangeType == ChangeType.Deleted);
+    }
+
+    [Fact]
+    public void MergeBase_And_RefExists_WorkAcrossBranches()
+    {
+        using var repo = new TempGitRepo();
+        repo.WriteFile("src/a.txt", "base\n");
+        var baseCommit = repo.Commit("base");
+
+        repo.WriteFile("src/a.txt", "main\n");
+        repo.Commit("main change");
+
+        repo.CheckoutNewBranch("feature", baseCommit);
+        repo.WriteFile("src/a.txt", "feature\n");
+        repo.Commit("feature change");
+        repo.Checkout("main");
+
+        var service = new GitService(repo.Root);
+
+        Assert.True(service.RefExists("main"));
+        Assert.True(service.RefExists("feature"));
+        Assert.False(service.RefExists("nonexistent-ref-12345"));
+
+        Assert.Equal("main", service.GetDefaultBranch());
+
+        var mergeBase = service.GetMergeBase("main", "feature");
+        Assert.Equal(baseCommit, mergeBase);
+    }
+
+    [Fact]
+    public void NonGitDirectory_ReturnsSafeDefaults()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"nongit_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var gitService = new GitService(tempDir);
-
-            // Act
-            var isRepo = gitService.IsGitRepository();
-
-            // Assert
-            Assert.False(isRepo);
+            var service = new GitService(tempDir);
+            Assert.False(service.IsGitRepository());
+            Assert.Null(service.GetRepositoryRoot());
+            Assert.Null(service.GetCurrentBranch());
+            Assert.Null(service.GetCurrentCommit());
+            Assert.Empty(service.GetUncommittedChanges());
+            Assert.Empty(service.GetChangedFiles("HEAD"));
+            Assert.Empty(service.GetChangedLines("src/a.txt", "HEAD"));
         }
         finally
         {
-            Directory.Delete(tempDir);
-        }
-    }
-
-    [Fact]
-    public void ParseDiffOutput_HandlesHunkHeaders()
-    {
-        // This is testing the internal parsing logic indirectly
-        // by checking that GetChangedLines returns reasonable data
-        var gitService = new GitService();
-
-        // Get changed lines for a file from the last commit
-        var files = gitService.GetChangedFilesInLastCommits(1);
-        if (files.Count == 0) return;
-
-        var changedLines = gitService.GetChangedLines(files[0], "HEAD~1", "HEAD");
-
-        // Assert
-        Assert.NotNull(changedLines);
-        // Each changed line should have valid data
-        foreach (var line in changedLines)
-        {
-            Assert.True(line.LineNumber >= 0);
-            Assert.True(line.ChangeType == ChangeType.Added ||
-                       line.ChangeType == ChangeType.Deleted ||
-                       line.ChangeType == ChangeType.Modified);
+            Directory.Delete(tempDir, recursive: true);
         }
     }
 }
