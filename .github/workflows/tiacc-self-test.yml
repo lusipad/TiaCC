@@ -185,24 +185,7 @@ jobs:
             exit 1
           fi
           
-          python3 - <<PY
-          import sys
-          import xml.etree.ElementTree as ET
-          
-          path = "$COVERAGE_FILE"
-          threshold = 0.90
-          
-          root = ET.parse(path).getroot()
-          line_rate = float(root.attrib.get("line-rate", "0"))
-          branch_rate = float(root.attrib.get("branch-rate", "0"))
-          
-          print(f"Coverage (line-rate):   {line_rate*100:.2f}%")
-          print(f"Coverage (branch-rate): {branch_rate*100:.2f}%")
-          print(f"Threshold (line-rate):  {threshold*100:.0f}%")
-          
-          if line_rate < threshold:
-              print(f"::warning title=Coverage below threshold::line-rate {line_rate*100:.2f}% is below {threshold*100:.0f}% (non-blocking)")
-          PY
+          python3 -c "import xml.etree.ElementTree as ET; path='$COVERAGE_FILE'; threshold=0.90; root=ET.parse(path).getroot(); line_rate=float(root.attrib.get('line-rate','0')); branch_rate=float(root.attrib.get('branch-rate','0')); print(f'Coverage (line-rate):   {line_rate*100:.2f}%'); print(f'Coverage (branch-rate): {branch_rate*100:.2f}%'); print(f'Threshold (line-rate):  {threshold*100:.0f}%'); print(f'::warning title=Coverage below threshold::line-rate {line_rate*100:.2f}% is below {threshold*100:.0f}% (non-blocking)') if line_rate < threshold else None"
 
       - name: Upload coverage artifact
         if: always()
