@@ -10,6 +10,10 @@ on:
     paths:
       - 'tools-dotnet/**'
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   # Job 1: .NET 全量测试，构建映射数据库
   dotnet-build-map:

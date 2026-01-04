@@ -11,6 +11,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   # Job 1: 测试和打包 NuGet
   test-and-pack:
@@ -153,6 +156,9 @@ jobs:
     name: Publish Packages
     needs: [test-and-pack, build-executables]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
 
     steps:
       - name: Download NuGet packages
