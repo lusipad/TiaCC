@@ -131,18 +131,74 @@ public class CoverageParserFormatTests : IDisposable
     #region LuaCov Format Tests
 
     [Fact]
-    public void ParseLuaCov_ValidFormat_ParsesCorrectly()
+    public void ParseLuaCov_StatsFormat_ParsesCorrectly()
     {
-        // LuaCov stats.out format with proper spacing
-        var luacov = @"src/main.lua     10      5     66.67%
-src/utils.lua     8      2     80.00%";
+        // LuaCov stats format (file header line, then line:hit entries)
+        // Note: Parser only includes files with at least 1 covered line.
+        var luacov = """
+            src/main.lua
+            1:1
+            2:0
+            3:5
+
+            src/utils.lua
+            1:0
+            2:0
+            """;
         var filePath = Path.Combine(_testDir, "luacov.stats.out");
         File.WriteAllText(filePath, luacov);
 
         var result = CoverageParser.ParseLuaCov(filePath);
 
-        // Parse structure varies - check we get some files
-        Assert.NotNull(result);
+        Assert.Single(result.Files);
+        Assert.True(result.Files.TryGetValue("src/main.lua", out var file));
+        Assert.Equal(2, file.CoveredLines);
+        Assert.Equal(3, file.TotalLines);
+        Assert.InRange(file.CoveragePercent, 66.6, 66.7);
+    }
+
+    [Fact]
+    public void ParseLuaCov_StatsFormat_DetectedByContent()
+    {
+        // File name doesn't include "stats", but content matches stats format.
+        var luacov = """
+            src/main.lua
+            10:1
+            """;
+        var filePath = Path.Combine(_testDir, "luacov.out");
+        File.WriteAllText(filePath, luacov);
+
+        var result = CoverageParser.ParseLuaCov(filePath);
+
+        Assert.Single(result.Files);
+        Assert.Contains("src/main.lua", result.Files.Keys);
+    }
+
+    [Fact]
+    public void ParseLuaCov_ReportFormat_ParsesCorrectly()
+    {
+        // LuaCov report format with per-line hit markers.
+        var luacov = """
+            ==========
+            src/main.lua
+            *     1  print("hit-by-marker")
+                  0  print("miss")
+                  3  print("hit-by-count")
+               ***  print("hit-by-stars")
+            ==========
+            src/utils.lua
+                  0  print("all-miss")
+            """;
+        var filePath = Path.Combine(_testDir, "luacov.report.out");
+        File.WriteAllText(filePath, luacov);
+
+        var result = CoverageParser.ParseLuaCov(filePath);
+
+        Assert.Single(result.Files);
+        Assert.True(result.Files.TryGetValue("src/main.lua", out var file));
+        Assert.Equal(3, file.CoveredLines);
+        Assert.Equal(4, file.TotalLines);
+        Assert.InRange(file.CoveragePercent, 74.9, 75.1);
     }
 
     [Fact]

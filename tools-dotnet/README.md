@@ -105,6 +105,8 @@ Run with coverage:
 dotnet test --collect:"XPlat Code Coverage"
 ```
 
+CI checks `TiaCC.Core` line coverage (target **90%**, Cobertura `line-rate`) and reports warnings without blocking the build.
+
 ## Dogfooding
 
 TiaCC uses itself to optimize its own CI pipeline:
