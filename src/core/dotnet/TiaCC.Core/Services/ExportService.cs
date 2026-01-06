@@ -30,6 +30,7 @@ public class ExportService
         Directory.CreateDirectory(outputDir);
 
         await Task.WhenAll(
+            ExportDashboardJsonAsync(Path.Combine(outputDir, "dashboard.json")),
             ExportStatsAsync(Path.Combine(outputDir, "stats.json")),
             ExportSourceFilesAsync(Path.Combine(outputDir, "source-files.json")),
             ExportTestScriptsAsync(Path.Combine(outputDir, "test-scripts.json")),
@@ -38,6 +39,59 @@ public class ExportService
             ExportGraphAsync(Path.Combine(outputDir, "graph.json")),
             ExportSymbolsAsync(Path.Combine(outputDir, "symbols.json"))
         );
+    }
+
+    public async Task ExportDashboardJsonAsync(string outputPath)
+    {
+        var sourceFiles = await _db.GetAllSourceFilesAsync();
+        var testScripts = await _db.GetAllTestScriptsAsync();
+        var mappings = await _db.GetAllMappingsAsync();
+        var symbols = await _db.GetAllSymbolsAsync();
+
+        var data = new
+        {
+            GeneratedAt = DateTime.UtcNow,
+            SourceFiles = sourceFiles.Select(f => new
+            {
+                Id = f.Id,
+                Path = f.FilePath,
+                Hash = f.FileHash,
+                LastScanned = f.LastUpdated
+            }),
+            TestScripts = testScripts.Select(t => new
+            {
+                Id = t.Id,
+                Name = t.ScriptPath,
+                LastRun = t.LastRun
+            }),
+            CoverageMap = mappings.Select(m => new
+            {
+                SourceFileId = m.SourceFileId,
+                TestScriptId = m.TestScriptId,
+                CoveragePercentage = m.LineCoveragePct,
+                HitCount = 0
+            }),
+            Symbols = symbols.Select(s => new
+            {
+                Id = s.Id,
+                SourceFileId = s.SourceFileId,
+                Name = s.SymbolName,
+                Kind = s.SymbolType,
+                StartLine = s.StartLine,
+                EndLine = s.EndLine
+            }),
+            SymbolCoverage = symbols
+                .SelectMany(s => s.SymbolCoverages.Select(sc => new
+                {
+                    SymbolId = sc.SymbolId,
+                    TestScriptId = sc.TestScriptId,
+                    CoveragePercentage = sc.CoveragePct,
+                    HitCount = 0
+                }))
+        };
+
+        var json = JsonSerializer.Serialize(data, JsonOptions);
+        await File.WriteAllTextAsync(outputPath, json);
     }
 
     public async Task ExportStatsAsync(string outputPath)

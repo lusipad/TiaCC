@@ -80,6 +80,7 @@ public class ExportServiceTests : IDisposable
 
         await exportService.ExportAllAsync(_outputDir);
 
+        Assert.True(File.Exists(Path.Combine(_outputDir, "dashboard.json")));
         Assert.True(File.Exists(Path.Combine(_outputDir, "stats.json")));
         Assert.True(File.Exists(Path.Combine(_outputDir, "source-files.json")));
         Assert.True(File.Exists(Path.Combine(_outputDir, "test-scripts.json")));
@@ -87,6 +88,13 @@ public class ExportServiceTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_outputDir, "directory-coverage.json")));
         Assert.True(File.Exists(Path.Combine(_outputDir, "graph.json")));
         Assert.True(File.Exists(Path.Combine(_outputDir, "symbols.json")));
+
+        var dashboardJson = await File.ReadAllTextAsync(Path.Combine(_outputDir, "dashboard.json"));
+        var dashboardDoc = JsonDocument.Parse(dashboardJson);
+        Assert.True(dashboardDoc.RootElement.TryGetProperty("generatedAt", out _));
+        Assert.True(dashboardDoc.RootElement.GetProperty("sourceFiles").GetArrayLength() > 0);
+        Assert.True(dashboardDoc.RootElement.GetProperty("testScripts").GetArrayLength() > 0);
+        Assert.True(dashboardDoc.RootElement.GetProperty("coverageMap").GetArrayLength() > 0);
     }
 
     [Fact]
@@ -307,7 +315,15 @@ public class ExportServiceTests : IDisposable
         await exportService.ExportAllAsync(_outputDir);
 
         // Verify all files exist
-        Assert.True(File.Exists(Path.Combine(_outputDir, "stats.json")));
+        Assert.True(File.Exists(Path.Combine(_outputDir, "dashboard.json")));
+        Assert.True(File.Exists(Path.Combine(_outputDir, "stats.json"))); 
+
+        var dashboardJson = await File.ReadAllTextAsync(Path.Combine(_outputDir, "dashboard.json"));
+        var dashboardDoc = JsonDocument.Parse(dashboardJson);
+        Assert.True(dashboardDoc.RootElement.TryGetProperty("generatedAt", out _));
+        Assert.Equal(0, dashboardDoc.RootElement.GetProperty("sourceFiles").GetArrayLength());
+        Assert.Equal(0, dashboardDoc.RootElement.GetProperty("testScripts").GetArrayLength());
+        Assert.Equal(0, dashboardDoc.RootElement.GetProperty("coverageMap").GetArrayLength());
 
         // Verify stats show zeros
         var statsJson = await File.ReadAllTextAsync(Path.Combine(_outputDir, "stats.json"));

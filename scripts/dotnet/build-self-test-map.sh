@@ -110,12 +110,82 @@ echo ""
 echo "=== Impact Map Statistics ==="
 dotnet run --project "$CLI_PROJECT" --no-build -c Release -- stats --db "$DB_PATH"
 
+# Validate database integrity (must have some mappings)
+echo ""
+echo "Validating impact map database..."
+python3 - <<PY
+import sqlite3
+import sys
+
+db_path = r"""$DB_PATH"""
+
+con = sqlite3.connect(db_path)
+cur = con.cursor()
+
+def count(table: str) -> int:
+    return int(cur.execute(f"select count(*) from {table}").fetchone()[0])
+
+tables = {
+    "source_files": 1,
+    "test_scripts": 1,
+    "coverage_map": 1,
+}
+
+ok = True
+for table, minimum in tables.items():
+    c = count(table)
+    print(f"{table}: {c}")
+    if c < minimum:
+        print(f"ERROR: expected at least {minimum} rows in {table}, got {c}")
+        ok = False
+
+if not ok:
+    sys.exit(1)
+PY
+
 # Export for dashboard
 echo ""
 echo "Exporting for dashboard..."
 dotnet run --project "$CLI_PROJECT" --no-build -c Release -- export \
   --db "$DB_PATH" \
   --output "$DASHBOARD_DATA_DIR"
+
+echo ""
+echo "Validating dashboard export..."
+python3 - <<PY
+import json
+import sys
+from pathlib import Path
+
+out_dir = Path(r"""$DASHBOARD_DATA_DIR""")
+dashboard = out_dir / "dashboard.json"
+required_files = [
+    "dashboard.json",
+    "stats.json",
+    "source-files.json",
+    "test-scripts.json",
+    "mappings.json",
+    "directory-coverage.json",
+    "graph.json",
+    "symbols.json",
+]
+
+missing = [f for f in required_files if not (out_dir / f).is_file()]
+if missing:
+    print("ERROR: missing exported file(s):", ", ".join(missing))
+    sys.exit(1)
+
+data = json.loads(dashboard.read_text(encoding="utf-8"))
+for key in ("sourceFiles", "testScripts", "coverageMap"):
+    if key not in data:
+        print(f"ERROR: dashboard.json missing key: {key}")
+        sys.exit(1)
+    if not isinstance(data[key], list) or len(data[key]) == 0:
+        print(f"ERROR: dashboard.json key {key} is empty")
+        sys.exit(1)
+
+print("dashboard.json looks valid")
+PY
 
 echo ""
 echo "=== Done ==="
