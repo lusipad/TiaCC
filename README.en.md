@@ -2,8 +2,10 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+[![Self Test](https://github.com/lusipad/TiaCC/actions/workflows/tiacc-self-test.yml/badge.svg?branch=main)](https://github.com/lusipad/TiaCC/actions/workflows/tiacc-self-test.yml)
+[![Publish](https://github.com/lusipad/TiaCC/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/lusipad/TiaCC/actions/workflows/publish.yml)
+[![Release](https://img.shields.io/github/v/release/lusipad/TiaCC)](https://github.com/lusipad/TiaCC/releases)
+[![License](https://img.shields.io/github/license/lusipad/TiaCC)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 
 ### Run Only Affected Tests, Make CI Lightning Fast
@@ -73,29 +75,10 @@ TiaCC builds source-to-test mappings through **code coverage analysis**:
 
 TiaCC provides a beautiful Web Dashboard to **visualize** code-test relationships:
 
-### Dependency Graph
-
-Intuitive view of source files (blue) and tests (green) relationships:
-
-<div align="center">
-<img src="docs/images/dashboard_main.png" alt="Dashboard Main View" width="800">
-</div>
-
-### Smart File Management
-
-Folder grouping with aggregate coverage, clear at a glance:
-
-<div align="center">
-<img src="docs/images/dashboard_folders.png" alt="Folder View" width="800">
-</div>
-
-### Function-Level Analysis
-
-Click any source file to see function-level coverage details:
-
-<div align="center">
-<img src="docs/images/dashboard_detail.png" alt="Detail Panel" width="800">
-</div>
+- Dependency graph: visualize source ↔ test relationships
+- File tree & aggregate coverage: find hotspots quickly
+- Search & function-level drill-down: locate key dependencies and low-coverage areas
+- See `docs/dashboard.md` for details
 
 ## Quick Start
 
@@ -103,7 +86,7 @@ Click any source file to see function-level coverage details:
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/YourUsername/TiaCC.git  # Replace with your fork
+git clone https://github.com/lusipad/TiaCC.git
 cd TiaCC
 
 # 2. Start Dashboard (Blazor)
@@ -115,7 +98,7 @@ dotnet run --project src/dashboard/dotnet/TiaCC.Dashboard/TiaCC.Dashboard.csproj
 #### Step 1: Install TiaCC CLI
 
 ```bash
-# Ensure .NET 10 SDK (Preview) is installed
+# Ensure .NET 10 SDK is installed (see global.json)
 dotnet --version
 
 # Build TiaCC CLI

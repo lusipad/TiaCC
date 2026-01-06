@@ -58,7 +58,7 @@ dotnet test \
 
 ```bash
 # 克隆 TiaCC（如果还没有）
-git clone https://github.com/your-org/TiaCC.git
+git clone https://github.com/lusipad/TiaCC.git
 
 # 构建 TiaCC CLI
 cd TiaCC
@@ -490,8 +490,8 @@ A: 当然！在本地修改代码后，运行 query 命令查看需要运行哪�
 
 ## 📚 更多资源
 
-- [完整文档](https://github.com/your-org/TiaCC/tree/main/docs)
-- [CI 模板](https://github.com/your-org/TiaCC/tree/main/ci-templates)
+- [完整文档](https://github.com/lusipad/TiaCC/tree/main/docs)
+- [CI 模板](https://github.com/lusipad/TiaCC/tree/main/ci-templates)
 - [Dashboard 可视化](dashboard.md)
 
 ---

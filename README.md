@@ -2,8 +2,10 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+[![Self Test](https://github.com/lusipad/TiaCC/actions/workflows/tiacc-self-test.yml/badge.svg?branch=main)](https://github.com/lusipad/TiaCC/actions/workflows/tiacc-self-test.yml)
+[![Publish](https://github.com/lusipad/TiaCC/actions/workflows/publish.yml/badge.svg?branch=main)](https://github.com/lusipad/TiaCC/actions/workflows/publish.yml)
+[![Release](https://img.shields.io/github/v/release/lusipad/TiaCC)](https://github.com/lusipad/TiaCC/releases)
+[![License](https://img.shields.io/github/license/lusipad/TiaCC)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 
 ### 只运行受影响的测试，让 CI 快如闪电
@@ -72,29 +74,10 @@ TiaCC 通过**代码覆盖率分析**建立源文件与测试的映射关系：
 
 TiaCC 提供美观的 Web Dashboard，让你**可视化**理解代码与测试的关系：
 
-### 依赖关系图
-
-直观展示源文件（蓝色）与测试（绿色）的关联：
-
-<div align="center">
-<img src="docs/images/dashboard_main.png" alt="Dashboard 主视图" width="800">
-</div>
-
-### 智能文件管理
-
-按文件夹分组，显示聚合覆盖率，一目了然：
-
-<div align="center">
-<img src="docs/images/dashboard_folders.png" alt="文件夹视图" width="800">
-</div>
-
-### 函数级分析
-
-点击任意源文件，查看函数级覆盖详情：
-
-<div align="center">
-<img src="docs/images/dashboard_detail.png" alt="详情面板" width="800">
-</div>
+- 依赖关系图：展示源文件与测试的关联
+- 文件树/覆盖率聚合：按目录聚合覆盖率，快速定位热点
+- 搜索与函数级定位：定位关键依赖与覆盖率薄弱区域
+- 详细说明见 `docs/dashboard.md`
 
 ## 快速开始
 
@@ -102,7 +85,7 @@ TiaCC 提供美观的 Web Dashboard，让你**可视化**理解代码与测试�
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/YourUsername/TiaCC.git  # 替换为实际仓库地址
+git clone https://github.com/lusipad/TiaCC.git
 cd TiaCC
 
 # 2. 启动 Dashboard（Blazor）
@@ -114,7 +97,7 @@ dotnet run --project src/dashboard/dotnet/TiaCC.Dashboard/TiaCC.Dashboard.csproj
 #### 第一步：安装 TiaCC CLI
 
 ```bash
-# 确保已安装 .NET 10 SDK (Preview)
+# 确保已安装 .NET 10 SDK（版本见 global.json）
 dotnet --version
 
 # 构建 TiaCC CLI

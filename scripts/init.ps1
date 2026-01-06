@@ -8,7 +8,7 @@
     and CI workflows.
 
 .EXAMPLE
-    irm https://raw.githubusercontent.com/your-org/TiaCC/main/scripts/init.ps1 | iex
+    irm https://raw.githubusercontent.com/lusipad/TiaCC/main/scripts/init.ps1 | iex
 
 .NOTES
     Requires Node.js 18+
@@ -151,7 +151,7 @@ function New-Config {
 
     $config = @'
 {
-  "$schema": "https://raw.githubusercontent.com/your-org/TiaCC/main/schemas/tia_config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/lusipad/TiaCC/main/schemas/tia_config.schema.json",
   "version": "1.0",
   "recording_mode": "precise",
   "bucket_size": 50,
@@ -340,7 +340,7 @@ function Write-NextSteps {
     Write-Host "4. Get affected tests in PR:"
     Write-Host "   tia-recommend --db impact_map.db --branch origin/main"
     Write-Host ""
-    Write-Host "Documentation: https://github.com/your-org/TiaCC"
+    Write-Host "Documentation: https://github.com/lusipad/TiaCC"
     Write-Host ""
 }
 

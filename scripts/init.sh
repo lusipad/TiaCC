@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # TiaCC Quick Initialization Script
-# Usage: curl -sSL https://raw.githubusercontent.com/your-org/TiaCC/main/scripts/init.sh | bash
+# Usage: curl -sSL https://raw.githubusercontent.com/lusipad/TiaCC/main/scripts/init.sh | bash
 #
 
 set -e
@@ -124,7 +124,7 @@ create_config() {
 
     cat > tia_config.json << 'EOF'
 {
-  "$schema": "https://raw.githubusercontent.com/your-org/TiaCC/main/schemas/tia_config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/lusipad/TiaCC/main/schemas/tia_config.schema.json",
   "version": "1.0",
   "recording_mode": "precise",
   "bucket_size": 50,
@@ -316,7 +316,7 @@ print_next_steps() {
     echo "4. Get affected tests in PR:"
     echo "   tia-recommend --db impact_map.db --branch origin/main"
     echo ""
-    echo "Documentation: https://github.com/your-org/TiaCC"
+    echo "Documentation: https://github.com/lusipad/TiaCC"
     echo ""
 }
 

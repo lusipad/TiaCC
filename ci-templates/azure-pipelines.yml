@@ -6,7 +6,7 @@
 #     repositories:
 #       - repository: tiacc
 #         type: github
-#         name: your-org/TiaCC
+#         name: lusipad/TiaCC
 #         ref: main
 #
 #   stages:

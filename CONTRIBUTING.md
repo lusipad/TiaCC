@@ -28,7 +28,7 @@
 
 ### 前置条件
 
-- .NET SDK 10.0 (Preview)
+- .NET SDK 10.0（版本见 global.json）
 - Clang 14+ (C++ 覆盖率)
 - CMake 3.20+
 
@@ -36,7 +36,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-org/TiaCC.git
+git clone https://github.com/lusipad/TiaCC.git
 cd TiaCC
 
 # 构建 .NET

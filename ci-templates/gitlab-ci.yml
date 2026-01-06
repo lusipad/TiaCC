@@ -3,7 +3,7 @@
 #
 # Usage:
 #   include:
-#     - remote: 'https://raw.githubusercontent.com/your-org/TiaCC/main/ci-templates/gitlab-ci.yml'
+#     - remote: 'https://raw.githubusercontent.com/lusipad/TiaCC/main/ci-templates/gitlab-ci.yml'
 #
 #   stages:
 #     - test

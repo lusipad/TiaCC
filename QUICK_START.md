@@ -5,11 +5,11 @@
 ## 安装
 
 ```bash
-# 确保已安装 .NET 10 SDK (Preview)
+# 确保已安装 .NET 10 SDK（版本见 global.json）
 dotnet --version
 
 # 克隆仓库
-git clone https://github.com/your-org/TiaCC.git
+git clone https://github.com/lusipad/TiaCC.git
 cd TiaCC
 
 # 构建
@@ -194,4 +194,4 @@ dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats \
 dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- --help
 ```
 
-有问题？请提交 [Issue](https://github.com/your-org/TiaCC/issues)
+有问题？请提交 [Issue](https://github.com/lusipad/TiaCC/issues)
