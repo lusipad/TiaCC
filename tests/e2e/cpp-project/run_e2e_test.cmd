@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 REM TiaCC C++ E2E 测试 - 使用 VS Developer 环境
 REM 这个脚本在 VS Developer Command Prompt 环境中运行 E2E 测试
 
@@ -123,10 +124,10 @@ REM 处理每个覆盖率文件
 for %%t in (test_calculator_basic test_calculator_advanced test_statistics test_string_utils) do (
     echo Processing %%t...
     llvm-profdata merge -sparse coverage_data\%%t.profraw -o coverage_data\%%t.profdata
-    REM Export JSON with functions included (default format is JSON)
-    llvm-cov export build\%%t.exe -instr-profile=coverage_data\%%t.profdata > coverage_data\%%t.cov.json
+    REM Export JSON with functions included (default format is JSON)      
+    llvm-cov export build\%%t.exe -instr-profile=coverage_data\%%t.profdata > coverage_data\%%t.coverage.json
     llvm-cov report build\%%t.exe -instr-profile=coverage_data\%%t.profdata > coverage_data\%%t.report.txt
-    echo   Generated: coverage_data\%%t.cov.json
+    echo   Generated: coverage_data\%%t.coverage.json
 )
 
 echo.
@@ -137,30 +138,33 @@ echo ============================================================
 echo Step 5: Building impact map...
 echo ============================================================
 
-REM 进入 tools-node 目录
-cd ..\..\..\tools-node
-
-REM 检查是否需要安装依赖
-if not exist node_modules (
-    echo Installing tools-node dependencies...
-    call npm install
-)
+REM 初始化数据库并映射覆盖率
+for %%I in ("%CD%\..\..\..") do set "REPO_ROOT=%%~fI"
+set "CLI_PROJECT=%REPO_ROOT%\src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj"
 
 REM 删除旧数据库
-set DB_PATH=..\tests\e2e\cpp-project\impact_map.db
-if exist %DB_PATH% del %DB_PATH%
+set "DB_PATH=%CD%\impact_map.db"
+if exist "%DB_PATH%" del "%DB_PATH%"
 
-REM 运行 mapper
-echo Building impact map database...
-call npx tsx src/cli/mapper.ts build ^
-    --coverage-dir ..\tests\e2e\cpp-project\coverage_data ^
-    --db %DB_PATH% ^
-    --base-path ..\tests\e2e\cpp-project ^
-    --verbose
-
-if not exist %DB_PATH% (
+echo Initializing database...
+dotnet run --project "%CLI_PROJECT%" -c Release -- init --db "%DB_PATH%"
+if !ERRORLEVEL! neq 0 (
     echo Failed to create database!
     exit /b 1
+)
+
+echo Mapping coverage files...
+for %%t in (test_calculator_basic test_calculator_advanced test_statistics test_string_utils) do (
+    dotnet run --project "%CLI_PROJECT%" -c Release -- map ^
+        --db "%DB_PATH%" ^
+        --coverage "%CD%\coverage_data\%%t.coverage.json" ^
+        --test "%%t" ^
+        --base-dir "%REPO_ROOT%"
+
+    if !ERRORLEVEL! neq 0 (
+        echo Failed to map coverage for %%t
+        exit /b 1
+    )
 )
 
 echo.
@@ -173,21 +177,21 @@ echo ============================================================
 
 echo.
 echo Query: Which tests cover calculator.cpp?
-call npx tsx src/cli/mapper.ts query calculator.cpp --db %DB_PATH%
+dotnet run --project "%CLI_PROJECT%" -c Release -- query --db "%DB_PATH%" --files "tests/e2e/cpp-project/src/calculator.cpp"
 
 echo.
 echo Query: Which tests cover statistics.cpp?
-call npx tsx src/cli/mapper.ts query statistics.cpp --db %DB_PATH%
+dotnet run --project "%CLI_PROJECT%" -c Release -- query --db "%DB_PATH%" --files "tests/e2e/cpp-project/src/statistics.cpp"
 
 echo.
 echo Query: Which tests cover string_utils.cpp?
-call npx tsx src/cli/mapper.ts query string_utils.cpp --db %DB_PATH%
+dotnet run --project "%CLI_PROJECT%" -c Release -- query --db "%DB_PATH%" --files "tests/e2e/cpp-project/src/string_utils.cpp"
 
 echo.
 echo ============================================================
 echo Database Statistics
 echo ============================================================
-call npx tsx src/cli/mapper.ts stats --db %DB_PATH%
+dotnet run --project "%CLI_PROJECT%" -c Release -- stats --db "%DB_PATH%"
 
 echo.
 echo ============================================================
@@ -196,3 +200,4 @@ echo ============================================================
 echo.
 
 cd ..\tests\e2e\cpp-project
+endlocal

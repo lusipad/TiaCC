@@ -58,5 +58,4 @@ cpp-project/
 
 - Clang 14+ with Profile Runtime
 - LLVM tools (llvm-profdata, llvm-cov)
-- Node.js 18+
-- TiaCC tools-node
+- .NET SDK (用于运行 `src/cli/dotnet/TiaCC.Cli`)

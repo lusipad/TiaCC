@@ -215,7 +215,7 @@ public class DashboardConfig
     /// Output directory for dashboard data
     /// </summary>
     [JsonPropertyName("outputDir")]
-    public string OutputDir { get; set; } = "./dashboard/data";
+    public string OutputDir { get; set; } = "./artifacts/tiacc-data/dashboard";
 
     /// <summary>
     /// Export format (json, html)

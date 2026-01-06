@@ -19,8 +19,8 @@ echo.
 REM Set paths
 set E2E_DIR=%~dp0tests\e2e
 set CPP_PROJECT=%E2E_DIR%\cpp-project
-set TOOLS_NODE_DIR=%~dp0tools-node
-set DASHBOARD_DIR=%~dp0dashboard
+set CLI_PROJECT=%~dp0src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj
+set DASHBOARD_DATA_DIR=%~dp0src\dashboard\dotnet\TiaCC.Dashboard\wwwroot\data
 set REPORT_DIR=%~dp0test-reports
 
 REM Create report directory
@@ -59,23 +59,14 @@ echo [Step 2] Generating Reports
 echo ============================================================
 echo.
 
-cd /d "%TOOLS_NODE_DIR%"
-
-REM Ensure dependencies are installed
-if not exist node_modules (
-    echo Installing tools-node dependencies...
-    call npm install >nul 2>&1
-)
-
 REM Export database statistics
 echo Exporting database statistics...
-call npx tsx src/cli/mapper.ts stats --db "%CPP_PROJECT%\impact_map.db" > "%REPORT_DIR%\cpp-project-stats.txt" 2>&1
+dotnet run --project "%CLI_PROJECT%" -c Release -- stats --db "%CPP_PROJECT%\impact_map.db" > "%REPORT_DIR%\cpp-project-stats.txt" 2>&1
 
-REM Export mapping data to JSON for Dashboard
+REM Export mapping data to JSON for Dashboard (Blazor)
 echo Exporting mapping data for Dashboard...
-if not exist "%DASHBOARD_DIR%\data" mkdir "%DASHBOARD_DIR%\data"
-
-call npx tsx src/cli/mapper.ts export --db "%CPP_PROJECT%\impact_map.db" --output "%DASHBOARD_DIR%\data" 2>nul
+if not exist "%DASHBOARD_DATA_DIR%" mkdir "%DASHBOARD_DATA_DIR%"
+dotnet run --project "%CLI_PROJECT%" -c Release -- export --db "%CPP_PROJECT%\impact_map.db" --output "%DASHBOARD_DATA_DIR%" > "%REPORT_DIR%\cpp-project-export.log" 2>&1
 
 echo Test data exported successfully!
 
@@ -85,7 +76,7 @@ echo [Step 3] Dashboard Ready
 echo ============================================================
 echo.
 
-echo Dashboard data ready at: %DASHBOARD_DIR%\data\
+echo Dashboard data ready at: %DASHBOARD_DATA_DIR%\
 echo.
 echo Test Results:
 echo   - C++ Project: %CPP_RESULT%

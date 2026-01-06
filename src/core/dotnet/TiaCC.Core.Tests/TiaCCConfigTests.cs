@@ -75,7 +75,7 @@ public class TiaCCConfigTests : IDisposable
     public void NewDashboardConfig_HasDefaultOutputDir()
     {
         var config = new DashboardConfig();
-        Assert.Equal("./dashboard/data", config.OutputDir);
+        Assert.Equal("./artifacts/tiacc-data/dashboard", config.OutputDir);
         Assert.Equal("json", config.Format);
     }
 

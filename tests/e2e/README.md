@@ -119,9 +119,9 @@ string_utils.cpp
    choco install cmake ninja
    ```
 
-3. **Node.js 18+**
+3. **.NET SDK**（用于运行 `TiaCC.Cli`）
    ```powershell
-   choco install nodejs
+   dotnet --info
    ```
 
 ## 运行完整 E2E 测试
@@ -190,7 +190,7 @@ test_string_utils.exe
 cd ..\coverage_data
 
 llvm-profdata merge -sparse test_calculator_basic.profraw -o test_calculator_basic.profdata
-llvm-cov export ..\build\test_calculator_basic.exe -instr-profile=test_calculator_basic.profdata -format=text > test_calculator_basic.cov.json
+llvm-cov export ..\build\test_calculator_basic.exe -instr-profile=test_calculator_basic.profdata -format=text > test_calculator_basic.coverage.json
 
 REM 对其他测试文件重复...
 ```
@@ -198,24 +198,29 @@ REM 对其他测试文件重复...
 #### 5. 构建映射数据库
 
 ```cmd
-cd ..\..\..\..\tools-node
+cd ..\..\..\..
 
-npx tsx src/cli/mapper.ts build ^
-    --coverage-dir ..\tests\e2e\cpp-project\coverage_data ^
-    --db ..\tests\e2e\cpp-project\impact_map.db ^
-    --verbose
+dotnet run --project src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj -c Release -- init --db tests\e2e\cpp-project\impact_map.db
+
+dotnet run --project src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj -c Release -- map ^
+    --db tests\e2e\cpp-project\impact_map.db ^
+    --coverage tests\e2e\cpp-project\coverage_data\test_calculator_basic.coverage.json ^
+    --test test_calculator_basic ^
+    --base-dir .
+
+REM 对其他测试文件重复...
 ```
 
 #### 6. 验证推荐
 
 ```cmd
-npx tsx src/cli/mapper.ts query calculator.cpp --db ..\tests\e2e\cpp-project\impact_map.db
+dotnet run --project src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj -c Release -- query --db tests\e2e\cpp-project\impact_map.db --files tests/e2e/cpp-project/src/calculator.cpp
 REM 应该返回: test_calculator_basic, test_calculator_advanced
 
-npx tsx src/cli/mapper.ts query statistics.cpp --db ..\tests\e2e\cpp-project\impact_map.db
+dotnet run --project src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj -c Release -- query --db tests\e2e\cpp-project\impact_map.db --files tests/e2e/cpp-project/src/statistics.cpp
 REM 应该返回: test_statistics
 
-npx tsx src/cli/mapper.ts query string_utils.cpp --db ..\tests\e2e\cpp-project\impact_map.db
+dotnet run --project src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj -c Release -- query --db tests\e2e\cpp-project\impact_map.db --files tests/e2e/cpp-project/src/string_utils.cpp
 REM 应该返回: test_string_utils, test_statistics
 ```
 
@@ -226,7 +231,7 @@ TiaCC 支持以下覆盖率文件格式：
 | 格式 | 扩展名 | 说明 |
 |------|--------|------|
 | LLVM profraw | `.profraw` | 原始覆盖率数据 (需要 llvm-profdata 和 llvm-cov 处理) |
-| LLVM JSON | `.cov.json` | 预处理的 LLVM JSON 导出 (推荐) |
+| LLVM JSON | `.coverage.json` | 预处理的 LLVM JSON 导出 (推荐) |
 | Coverlet JSON | `.coverage.json` | .NET Coverlet 格式 |
 
 ## 故障排除

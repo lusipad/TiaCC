@@ -75,7 +75,7 @@ class Program
         var outputOption = new Option<string>(
             aliases: ["--output", "-o"],
             description: "Output directory for JSON files",
-            getDefaultValue: () => "./dashboard/data");
+            getDefaultValue: () => "./artifacts/tiacc-data/dashboard");
         exportCommand.AddOption(dbOption);
         exportCommand.AddOption(outputOption);
         exportCommand.SetHandler(async (string db, string output) =>

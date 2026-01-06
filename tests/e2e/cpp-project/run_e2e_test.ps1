@@ -42,7 +42,8 @@ $ProjectRoot = $PSScriptRoot
 $BuildDir = Join-Path $ProjectRoot "build"
 $CoverageDir = Join-Path $ProjectRoot "coverage_data"
 $DbPath = Join-Path $ProjectRoot "impact_map.db"
-$ToolsNodeDir = Join-Path (Split-Path (Split-Path (Split-Path $ProjectRoot))) "tools-node"
+$RepoRoot = Split-Path (Split-Path (Split-Path $ProjectRoot))
+$CliProject = Join-Path $RepoRoot "src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj"
 
 # 自动检测 LLVM 路径
 $DefaultLLVMPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin"
@@ -254,7 +255,7 @@ function Invoke-ProcessCoverage {
     foreach ($profraw in $profrawFiles) {
         $testName = $profraw.BaseName
         $profdataPath = Join-Path $CoverageDir "$testName.profdata"
-        $jsonPath = Join-Path $CoverageDir "$testName.cov.json"
+        $jsonPath = Join-Path $CoverageDir "$testName.coverage.json"
 
         Write-Step "处理: $testName"
 
@@ -295,55 +296,42 @@ function Invoke-ProcessCoverage {
 function Invoke-BuildMapping {
     Write-Header "步骤 4: 构建映射数据库"
 
-    # 进入 tools-node 目录
-    Push-Location $ToolsNodeDir
+    if (Test-Path $DbPath) {
+        Remove-Item $DbPath
+    }
 
-    try {
-        # 确保依赖已安装
-        if (-not (Test-Path "node_modules")) {
-            Write-Step "安装 tools-node 依赖..."
-            npm install
-        }
+    $coverageFiles = Get-ChildItem $CoverageDir -Filter "*.coverage.json" -File | Sort-Object FullName
+    if (-not $coverageFiles) {
+        Write-Error "未找到覆盖率文件: $CoverageDir\*.coverage.json"
+        exit 1
+    }
 
-        # 确保已构建
-        if (-not (Test-Path "dist")) {
-            Write-Step "构建 tools-node..."
-            npm run build
-        }
+    Write-Step "初始化数据库..."
+    dotnet run --project $CliProject -c Release -- init --db $DbPath
+    if ($LASTEXITCODE -ne 0) { throw "dotnet init failed ($LASTEXITCODE)" }
 
-        # 删除旧数据库
-        if (Test-Path $DbPath) {
-            Remove-Item $DbPath
-        }
-
-        # 运行 mapper
-        Write-Step "构建映射数据库..."
-
-        # 获取第一个可执行文件作为参考
-        $exePath = Join-Path $BuildDir "test_calculator_basic.exe"
-
-        npx tsx src/cli/mapper.ts build `
-            --coverage-dir $CoverageDir `
+    foreach ($coverageFile in $coverageFiles) {
+        $testName = ($coverageFile.BaseName -replace '\.coverage$', '')
+        Write-Step "映射覆盖率: $testName"
+        dotnet run --project $CliProject -c Release -- map `
             --db $DbPath `
-            --executable $exePath `
-            --verbose
-
-        if (Test-Path $DbPath) {
-            $size = (Get-Item $DbPath).Length
-            Write-Success "数据库已创建: $DbPath ($size bytes)"
-
-            # 显示统计
-            Write-Step "数据库统计:"
-            npx tsx src/cli/mapper.ts stats --db $DbPath
-        }
-        else {
-            Write-Error "数据库创建失败"
-            exit 1
-        }
+            --coverage $coverageFile.FullName `
+            --test $testName `
+            --base-dir $RepoRoot
+        if ($LASTEXITCODE -ne 0) { throw "dotnet map failed for $testName ($LASTEXITCODE)" }
     }
-    finally {
-        Pop-Location
+
+    if (-not (Test-Path $DbPath)) {
+        Write-Error "数据库创建失败"
+        exit 1
     }
+
+    $size = (Get-Item $DbPath).Length
+    Write-Success "数据库已创建: $DbPath ($size bytes)"
+
+    Write-Step "数据库统计:"
+    dotnet run --project $CliProject -c Release -- stats --db $DbPath
+    if ($LASTEXITCODE -ne 0) { throw "dotnet stats failed ($LASTEXITCODE)" }
 }
 
 # ============================================================================
@@ -353,77 +341,70 @@ function Invoke-BuildMapping {
 function Invoke-Verify {
     Write-Header "步骤 5: 验证推荐功能"
 
-    Push-Location $ToolsNodeDir
+    # 测试场景
+    $scenarios = @(
+        @{
+            Description   = "修改 calculator.cpp"
+            File          = "tests/e2e/cpp-project/src/calculator.cpp"
+            ExpectedTests = @("test_calculator_basic", "test_calculator_advanced")
+        },
+        @{
+            Description   = "修改 statistics.cpp"
+            File          = "tests/e2e/cpp-project/src/statistics.cpp"
+            ExpectedTests = @("test_statistics")
+        },
+        @{
+            Description   = "修改 string_utils.cpp"
+            File          = "tests/e2e/cpp-project/src/string_utils.cpp"
+            ExpectedTests = @("test_string_utils", "test_statistics")
+        }
+    )
 
-    try {
-        # 测试场景
-        $scenarios = @(
-            @{
-                Description   = "修改 calculator.cpp"
-                File          = "calculator.cpp"
-                ExpectedTests = @("test_calculator_basic", "test_calculator_advanced")
-            },
-            @{
-                Description   = "修改 statistics.cpp"
-                File          = "statistics.cpp"
-                ExpectedTests = @("test_statistics")
-            },
-            @{
-                Description   = "修改 string_utils.cpp"
-                File          = "string_utils.cpp"
-                ExpectedTests = @("test_string_utils", "test_statistics")
+    $allPassed = $true
+
+    foreach ($scenario in $scenarios) {
+        Write-Step "场景: $($scenario.Description)"
+
+        $result = dotnet run --project $CliProject -c Release -- query --db $DbPath --files $scenario.File 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "dotnet query failed ($LASTEXITCODE)" }
+
+        Write-Info "查询结果:"
+        Write-Host $result
+
+        $allExpectedFound = $true
+        foreach ($expectedTest in $scenario.ExpectedTests) {
+            if ($result -match [regex]::Escape($expectedTest)) {
+                Write-Success "  找到预期测试: $expectedTest"
             }
-        )
-
-        $allPassed = $true
-
-        foreach ($scenario in $scenarios) {
-            Write-Step "场景: $($scenario.Description)"
-
-            # 查询受影响的测试
-            $result = npx tsx src/cli/mapper.ts query $scenario.File --db $DbPath 2>&1
-
-            Write-Info "查询结果:"
-            Write-Host $result
-
-            # 验证预期的测试是否在结果中
-            $allExpectedFound = $true
-            foreach ($expectedTest in $scenario.ExpectedTests) {
-                if ($result -match $expectedTest) {
-                    Write-Success "  找到预期测试: $expectedTest"
-                }
-                else {
-                    Write-Error "  未找到预期测试: $expectedTest"
-                    $allExpectedFound = $false
-                }
+            else {
+                Write-Error "  未找到预期测试: $expectedTest"
+                $allExpectedFound = $false
             }
-
-            if (-not $allExpectedFound) {
-                $allPassed = $false
-            }
-
-            Write-Host ""
         }
 
-        # 导出数据用于 Dashboard
-        Write-Step "导出数据到 Dashboard..."
-        $dashboardDataDir = Join-Path $ProjectRoot "dashboard_data"
-        if (-not (Test-Path $dashboardDataDir)) {
-            New-Item -ItemType Directory -Path $dashboardDataDir | Out-Null
+        if (-not $allExpectedFound) {
+            $allPassed = $false
         }
 
-        npx tsx src/cli/mapper.ts export --db $DbPath --output $dashboardDataDir
-
-        if ($allPassed) {
-            Write-Success "所有验证场景通过!"
-        }
-        else {
-            Write-Error "部分验证场景失败"
-            exit 1
-        }
+        Write-Host ""
     }
-    finally {
-        Pop-Location
+
+    # 导出数据用于 Dashboard
+    Write-Step "导出数据到 Dashboard..."
+    $dashboardDataDir = Join-Path $ProjectRoot "dashboard_data"
+    if (-not (Test-Path $dashboardDataDir)) {
+        New-Item -ItemType Directory -Path $dashboardDataDir | Out-Null
+    }
+
+    dotnet run --project $CliProject -c Release -- export --db $DbPath --output $dashboardDataDir
+    if ($LASTEXITCODE -ne 0) { throw "dotnet export failed ($LASTEXITCODE)" }
+
+    if ($allPassed) {
+        Write-Success "所有验证场景通过!"
+    }
+    else {
+        Write-Error "部分验证场景失败"
+        exit 1
     }
 }
 

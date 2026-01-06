@@ -115,23 +115,24 @@ cd ..\..\managed
 dotnet build
 
 :: 3. 运行测试并收集覆盖率
-dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=json
+dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=json --filter "FullyQualifiedName~MathServiceTests"
 
 :: 4. 处理 C++ 覆盖率
 llvm-profdata merge -sparse *.profraw -o coverage.profdata
-llvm-cov export native_lib.dll -instr-profile=coverage.profdata > cpp.cov.json
+llvm-cov export native_lib.dll -instr-profile=coverage.profdata -format=text > cpp.coverage.json
 
 :: 5. 构建映射
-cd ..\..\..\tools-node
-npx tsx src/cli/mapper.ts build --coverage-dir ../tests/e2e/mixed-project/coverage_data --db ../tests/e2e/mixed-project/impact_map.db
+cd ..\..\..
+dotnet run --project src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj -c Release -- init --db tests\e2e\mixed-project\impact_map.db
+dotnet run --project src\cli\dotnet\TiaCC.Cli\TiaCC.Cli.csproj -c Release -- map --db tests\e2e\mixed-project\impact_map.db --coverage tests\e2e\mixed-project\coverage_data\cpp.coverage.json --test MathServiceTests --base-dir .
 ```
 
 ## 验证查询
 
 ```bash
 # 查询 C++ 文件
-npx tsx src/cli/mapper.ts query math_engine.cpp --db ../tests/e2e/mixed-project/impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -c Release -- query --db tests/e2e/mixed-project/impact_map.db --files tests/e2e/mixed-project/native/src/math_engine.cpp
 
 # 查询 C# 文件
-npx tsx src/cli/mapper.ts query MathService.cs --db ../tests/e2e/mixed-project/impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -c Release -- query --db tests/e2e/mixed-project/impact_map.db --files tests/e2e/mixed-project/managed/MixedApp/MathService.cs
 ```
