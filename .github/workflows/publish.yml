@@ -31,7 +31,7 @@ jobs:
       - name: Setup .NET (from global.json)
         uses: actions/setup-dotnet@v4
         with:
-          global-json-file: tools-dotnet/global.json
+          global-json-file: global.json
           include-prerelease: true
 
       - name: Determine version
@@ -47,33 +47,28 @@ jobs:
           echo "Publishing version: $VERSION"
 
       - name: Restore dependencies
-        working-directory: tools-dotnet
-        run: dotnet restore
+        run: dotnet restore src/TiaCC.DotNet.sln
 
-      - name: Build TiaCC.Cli
-        working-directory: tools-dotnet
+      - name: Build solution
         run: |
-          dotnet build TiaCC.Cli/TiaCC.Cli.csproj \
+          dotnet build src/TiaCC.DotNet.sln \
             -c Release \
             --no-restore \
             /p:Version=${{ steps.version.outputs.VERSION }}
 
       - name: Run tests
-        working-directory: tools-dotnet
-        run: dotnet test -c Release --no-build
+        run: dotnet test src/TiaCC.DotNet.sln -c Release --no-build
 
       - name: Pack NuGet package
-        working-directory: tools-dotnet
         run: |
-          dotnet pack TiaCC.Cli/TiaCC.Cli.csproj \
+          dotnet pack src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj \
             -c Release \
             --no-build \
             -o ./artifacts \
             /p:Version=${{ steps.version.outputs.VERSION }} \
-            /p:PackageVersion=${{ steps.version.outputs.VERSION }}
+            /p:PackageVersion=${{ steps.version.outputs.VERSION }}        
 
       - name: List generated packages
-        working-directory: tools-dotnet
         run: |
           echo "Generated NuGet packages:"
           ls -lh artifacts/*.nupkg
@@ -82,7 +77,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages
-          path: tools-dotnet/artifacts/*.nupkg
+          path: artifacts/*.nupkg
           retention-days: 7
 
   # Job 2: 构建多平台可执行程序
@@ -116,31 +111,30 @@ jobs:
       - name: Setup .NET (from global.json)
         uses: actions/setup-dotnet@v4
         with:
-          global-json-file: tools-dotnet/global.json
+          global-json-file: global.json
           include-prerelease: true
 
       - name: Publish self-contained executable
-        working-directory: tools-dotnet
         run: |
-          dotnet publish TiaCC.Cli/TiaCC.Cli.csproj \
+          dotnet publish src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj \
             -c Release \
             -r ${{ matrix.runtime }} \
             --self-contained true \
             -p:PublishSingleFile=true \
             -p:PublishTrimmed=true \
             -p:Version=${{ needs.test-and-pack.outputs.version }} \
-            -o ./publish/${{ matrix.runtime }}
+            -o ./artifacts/publish/${{ matrix.runtime }}
 
       - name: Create archive (Windows)
         if: runner.os == 'Windows'
-        working-directory: tools-dotnet/publish/${{ matrix.runtime }}
+        working-directory: artifacts/publish/${{ matrix.runtime }}
         run: |
           Compress-Archive -Path * -DestinationPath ../../${{ matrix.artifact_name }}
         shell: pwsh
 
       - name: Create archive (Unix)
         if: runner.os != 'Windows'
-        working-directory: tools-dotnet/publish
+        working-directory: artifacts/publish
         run: |
           tar -czf ../${{ matrix.artifact_name }} -C ${{ matrix.runtime }} .
 
@@ -148,7 +142,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: executable-${{ matrix.runtime }}
-          path: tools-dotnet/${{ matrix.artifact_name }}
+          path: artifacts/${{ matrix.artifact_name }}
           retention-days: 7
 
   # Job 3: 发布到 NuGet 和 GitHub
@@ -161,6 +155,12 @@ jobs:
       packages: write
 
     steps:
+      - name: Setup .NET (from global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          include-prerelease: true
+
       - name: Download NuGet packages
         uses: actions/download-artifact@v4
         with:

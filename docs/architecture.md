@@ -84,7 +84,7 @@ TiaCC (Test Impact Analysis for Code Coverage) 是一个跨平台测试影响分
 #### 2.1.1 C++ 覆盖率 (LLVM Profile)
 
 ```
-src/cpp/
+src/core/cpp/
 ├── include/
 │   ├── tia/coverage_api.h     # 覆盖率控制 API
 │   ├── tia/ipc_server.h       # IPC 服务器
@@ -104,18 +104,14 @@ src/cpp/
 #### 2.1.2 C# 覆盖率 (Coverlet)
 
 ```
-src/dotnet/
-├── TiaCC.Coverage/           # 覆盖率库
-│   ├── CoverageController.cs
-│   └── CoverageExporter.cs
-└── TiaCC.CoverageService/    # 覆盖率服务
-    └── Program.cs
+src/collectors/dotnet/coverlet/
+└── TiaCC.Coverlet.Collector/   # Coverlet DataCollector（覆盖率采集）
 ```
 
 ### 2.2 测试框架客户端
 
 ```
-clients/
+src/clients/
 ├── tia_hooks.lua    # Lua 客户端 (主要)
 ├── tia_hooks.py     # Python 客户端
 ├── TiaHooks.cs      # C# 客户端
@@ -127,11 +123,11 @@ clients/
 2. 在测试前后发送信号
 3. 管理录制模式 (精确/批量)
 
-### 2.3 CLI 工具 (tools-dotnet)
+### 2.3 CLI / Dashboard (.NET)
 
 ```
-tools-dotnet/
-├── TiaCC.Core/              # 核心库
+src/
+├── core/dotnet/TiaCC.Core/              # 核心库
 │   ├── Services/
 │   │   ├── CoverageParser.cs    # 覆盖率解析器
 │   │   ├── DatabaseService.cs   # SQLite 数据库操作
@@ -139,9 +135,9 @@ tools-dotnet/
 │   │   ├── SymbolExtractor.cs   # 符号提取器
 │   │   └── ExportService.cs     # 导出服务
 │   └── Models/                  # 数据模型
-├── TiaCC.Cli/               # CLI 工具
-│   └── Program.cs           # 主入口 (init, map, query, stats)
-└── TiaCC.Dashboard/         # Dashboard 服务
+├── cli/dotnet/TiaCC.Cli/               # CLI 工具
+│   └── Program.cs                     # 主入口 (init, map, query, stats)
+└── dashboard/dotnet/TiaCC.Dashboard/   # Blazor Dashboard
 ```
 
 ---
@@ -556,27 +552,27 @@ TiaCC 支持多种主流覆盖率格式，满足不同语言和工具链的需�
 
 ```bash
 # 初始化数据库
-dotnet run --project TiaCC.Cli -- init --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
 
 # 映射覆盖率数据
-dotnet run --project TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage ./coverage/*.cobertura.xml \
   --test TestClassName \
   [--base-dir .]
 
 # 查看数据库统计
-dotnet run --project TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 
 # 查询文件的测试
-dotnet run --project TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/Calculator.cs
 
 # 导出数据到 JSON (用于 Dashboard)
-dotnet run --project TiaCC.Cli -- export \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- export \
   --db impact_map.db \
-  --output ./dashboard/data
+  --output ./src/dashboard/dotnet/TiaCC.Dashboard/wwwroot/data
 ```
 
 ### 7.2 常用工作流
@@ -584,15 +580,15 @@ dotnet run --project TiaCC.Cli -- export \
 ```bash
 # Nightly: 收集覆盖率并构建映射
 dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage
-dotnet run --project TiaCC.Cli -- init --db impact_map.db
-dotnet run --project TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage ./coverage/*/coverage.cobertura.xml \
   --test MyTests
 
 # PR: 查询受影响的测试
 CHANGED_FILES=$(git diff --name-only origin/main)
-dotnet run --project TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files $CHANGED_FILES
 ```
@@ -607,9 +603,7 @@ TiaCC Dashboard 是一个基于 Web 的交互式可视化工具，用于展示�
 
 **启动方式：**
 ```bash
-cd dashboard
-python -m http.server 8080
-# 访问 http://localhost:8080/dashboard/
+dotnet run --project src/dashboard/dotnet/TiaCC.Dashboard/TiaCC.Dashboard.csproj -c Release
 ```
 
 ### 8.2 核心功能
@@ -704,7 +698,7 @@ Lines 15-22 · 2 tests
 
 ### 8.7 数据文件
 
-Dashboard 从 `dashboard/data/` 目录加载 JSON 数据：
+Dashboard 从 `src/dashboard/dotnet/TiaCC.Dashboard/wwwroot/data/` 目录加载 JSON 数据：
 
 | 文件 | 内容 |
 |------|------|
@@ -820,7 +814,7 @@ priority_score = w1 * coverage_score
 ```bash
 # 1. 查询受影响的测试
 CHANGED=$(git diff --name-only origin/main)
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files $CHANGED
 
@@ -831,7 +825,7 @@ dotnet run --project tools-dotnet/TiaCC.Cli -- query \
 #   test_cache_invalidation
 
 # 2. 查看数据库统计
-dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 
 # 输出示例:
 # 📊 Database Statistics:
@@ -897,7 +891,7 @@ TiaCC CLI 支持批量处理多个覆盖率文件：
 # 批量映射所有覆盖率文件
 for coverage_file in ./coverage/**/coverage.cobertura.xml; do
   TEST_NAME=$(basename $(dirname "$coverage_file"))
-  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+  dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
     --db impact_map.db \
     --coverage "$coverage_file" \
     --test "$TEST_NAME"

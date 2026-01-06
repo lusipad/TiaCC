@@ -32,7 +32,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Build TiaCC
-        run: dotnet build tools-dotnet -c Release
+        run: dotnet build src/TiaCC.DotNet.sln -c Release
 
       - name: Download impact map
         uses: dawidd6/action-download-artifact@v3
@@ -46,7 +46,7 @@ jobs:
         run: |
           if [ -f impact_map.db ]; then
             CHANGED=$(git diff --name-only origin/main)
-            AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+            AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
               --db impact_map.db --files $CHANGED 2>/dev/null || echo "")
             echo "affected=$AFFECTED" >> $GITHUB_OUTPUT
           fi
@@ -77,10 +77,10 @@ build-mapping:
   only:
     - main
   script:
-    - dotnet build tools-dotnet -c Release
+    - dotnet build src/TiaCC.DotNet.sln -c Release
     - dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage
-    - dotnet run --project tools-dotnet/TiaCC.Cli -- init --db $TIACC_DATABASE
-    - dotnet run --project tools-dotnet/TiaCC.Cli -- map --db $TIACC_DATABASE --coverage ./coverage/*/coverage.cobertura.xml --test AllTests
+    - dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db $TIACC_DATABASE
+    - dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map --db $TIACC_DATABASE --coverage ./coverage/*/coverage.cobertura.xml --test AllTests
   artifacts:
     paths:
       - $TIACC_DATABASE
@@ -91,9 +91,9 @@ smart-test:
   only:
     - merge_requests
   script:
-    - dotnet build tools-dotnet -c Release
+    - dotnet build src/TiaCC.DotNet.sln -c Release
     - CHANGED=$(git diff --name-only origin/main)
-    - AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query --db $TIACC_DATABASE --files $CHANGED || echo "")
+    - AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query --db $TIACC_DATABASE --files $CHANGED || echo "")
     - |
       if [ -n "$AFFECTED" ]; then
         FILTER=$(echo "$AFFECTED" | tr '\n' '|' | sed 's/|$//')
@@ -117,7 +117,7 @@ pipeline {
     stages {
         stage('Setup') {
             steps {
-                sh 'dotnet build tools-dotnet -c Release'
+                sh 'dotnet build src/TiaCC.DotNet.sln -c Release'
             }
         }
 
@@ -137,8 +137,8 @@ pipeline {
             steps {
                 sh 'dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage'
                 sh '''
-                    dotnet run --project tools-dotnet/TiaCC.Cli -- init --db ${TIACC_DATABASE}
-                    dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+                    dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db ${TIACC_DATABASE}
+                    dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
                         --db ${TIACC_DATABASE} \
                         --coverage ./coverage/*/coverage.cobertura.xml \
                         --test AllTests
@@ -153,7 +153,7 @@ pipeline {
                 script {
                     def changed = sh(script: 'git diff --name-only origin/main', returnStdout: true).trim()
                     env.AFFECTED = sh(
-                        script: "dotnet run --project tools-dotnet/TiaCC.Cli -- query --db ${TIACC_DATABASE} --files ${changed}",
+                        script: "dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query --db ${TIACC_DATABASE} --files ${changed}",
                         returnStdout: true
                     ).trim()
                 }
@@ -200,11 +200,11 @@ stages:
           - task: UseDotNet@2
             inputs:
               version: '8.0.x'
-          - script: dotnet build tools-dotnet -c Release
+          - script: dotnet build src/TiaCC.DotNet.sln -c Release
           - script: dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage
           - script: |
-              dotnet run --project tools-dotnet/TiaCC.Cli -- init --db $(TIACC_DATABASE)
-              dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+              dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db $(TIACC_DATABASE)
+              dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
                 --db $(TIACC_DATABASE) \
                 --coverage ./coverage/*/coverage.cobertura.xml \
                 --test AllTests
@@ -223,10 +223,10 @@ stages:
             inputs:
               artifactName: tiacc-database
             continueOnError: true
-          - script: dotnet build tools-dotnet -c Release
+          - script: dotnet build src/TiaCC.DotNet.sln -c Release
           - script: |
               CHANGED=$(git diff --name-only origin/$(System.PullRequest.TargetBranch))
-              dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+              dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
                 --db $(TIACC_DATABASE) \
                 --files $CHANGED \
                 > affected-tests.txt
@@ -314,7 +314,7 @@ Export data for Dashboard visualization:
 ```bash
 dotnet run --project TiaCC.Cli -- export \
   --db impact_map.db \
-  --output ./dashboard/data
+  --output src/dashboard/dotnet/TiaCC.Dashboard/wwwroot/data
 ```
 
 ## Supported Coverage Formats
@@ -360,9 +360,9 @@ jobs:
       - name: Build TiaCC mapping
         if: github.ref == 'refs/heads/main'
         run: |
-          dotnet build tools-dotnet -c Release
-          dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
-          dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+          dotnet build src/TiaCC.DotNet.sln -c Release
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
             --db impact_map.db \
             --coverage ./coverage/*/coverage.cobertura.xml \
             --test AllTests
@@ -372,9 +372,9 @@ jobs:
         if: github.event_name == 'pull_request'
         id: tiacc
         run: |
-          dotnet build tools-dotnet -c Release
+          dotnet build src/TiaCC.DotNet.sln -c Release
           CHANGED=$(git diff --name-only origin/main)
-          AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+          AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
             --db impact_map.db --files $CHANGED 2>/dev/null || echo "")
           echo "filter=$AFFECTED" >> $GITHUB_OUTPUT
 
@@ -415,11 +415,11 @@ jobs:
       - name: Build TiaCC mapping
         if: github.ref == 'refs/heads/main'
         run: |
-          dotnet build tools-dotnet -c Release
-          dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+          dotnet build src/TiaCC.DotNet.sln -c Release
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
           # Note: LCOV support via Cobertura conversion
           lcov_cobertura coverage.info -o coverage.cobertura.xml
-          dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
             --db impact_map.db --coverage coverage.cobertura.xml --test AllTests
 
       # PR: run affected tests
@@ -430,7 +430,7 @@ jobs:
           cmake --build build
 
           CHANGED=$(git diff --name-only origin/main)
-          AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+          AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
             --db impact_map.db --files $CHANGED 2>/dev/null || echo "")
 
           if [ -n "$AFFECTED" ]; then

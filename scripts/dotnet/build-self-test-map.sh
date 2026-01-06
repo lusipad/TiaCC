@@ -5,14 +5,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-DATA_DIR="$PROJECT_DIR/tiacc-data"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SOLUTION_PATH="$REPO_ROOT/src/TiaCC.DotNet.sln"
+CLI_PROJECT="$REPO_ROOT/src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj"
+TEST_PROJECT="$REPO_ROOT/src/core/dotnet/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
+DASHBOARD_DATA_DIR="$REPO_ROOT/src/dashboard/dotnet/TiaCC.Dashboard/wwwroot/data"
+
+DATA_DIR="$REPO_ROOT/artifacts/tiacc-data"
 COVERAGE_DIR="$DATA_DIR/coverage"
 DB_PATH="$DATA_DIR/impact_map.db"
-TEST_PROJECT="$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
 
 echo "=== TiaCC .NET Self-Testing (Dogfooding) ==="
-echo "Project: $PROJECT_DIR"
+echo "Repo:    $REPO_ROOT"
 echo "Data: $DATA_DIR"
 echo ""
 
@@ -21,12 +25,12 @@ mkdir -p "$COVERAGE_DIR"
 
 # Build the solution
 echo "Building solution..."
-dotnet build "$PROJECT_DIR/TiaCC.sln" -c Release
+dotnet build "$SOLUTION_PATH" -c Release
 
 # Initialize the database
 echo ""
 echo "Initializing database..."
-dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- init --db "$DB_PATH"
+dotnet run --project "$CLI_PROJECT" --no-build -c Release -- init --db "$DB_PATH"
 
 # Discover test classes (Namespace.Class) from dotnet test --list-tests output.
 echo ""
@@ -56,11 +60,11 @@ if [ -z "$TEST_CLASSES" ]; then
   fi
 
   echo "Mapping coverage from: $COVERAGE_FILE"
-  dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- map \
+  dotnet run --project "$CLI_PROJECT" --no-build -c Release -- map \
     --db "$DB_PATH" \
     --coverage "$COVERAGE_FILE" \
     --test "TiaCC.Core.Tests" \
-    --base-dir "$PROJECT_DIR"
+    --base-dir "$REPO_ROOT"
 else
   echo "Found $(echo "$TEST_CLASSES" | wc -l | tr -d ' ') test classes, running individually..."
 
@@ -93,27 +97,27 @@ else
     cp "$COVERAGE_FILE" "$COVERAGE_DIR/test_${TEST_CLASS}.cobertura.xml"
 
     echo "Mapping coverage for $TEST_CLASS..."
-    dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- map \
+    dotnet run --project "$CLI_PROJECT" --no-build -c Release -- map \
       --db "$DB_PATH" \
       --coverage "$COVERAGE_FILE" \
       --test "$TEST_CLASS" \
-      --base-dir "$PROJECT_DIR"
+      --base-dir "$REPO_ROOT"
   done <<< "$TEST_CLASSES"
 fi
 
 # Show statistics
 echo ""
 echo "=== Impact Map Statistics ==="
-dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- stats --db "$DB_PATH"
+dotnet run --project "$CLI_PROJECT" --no-build -c Release -- stats --db "$DB_PATH"
 
 # Export for dashboard
 echo ""
 echo "Exporting for dashboard..."
-dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" --no-build -c Release -- export \
+dotnet run --project "$CLI_PROJECT" --no-build -c Release -- export \
   --db "$DB_PATH" \
-  --output "$PROJECT_DIR/TiaCC.Dashboard/wwwroot/data"
+  --output "$DASHBOARD_DATA_DIR"
 
 echo ""
 echo "=== Done ==="
 echo "Impact map: $DB_PATH"
-echo "Dashboard data: $PROJECT_DIR/TiaCC.Dashboard/wwwroot/data/dashboard.json"
+echo "Dashboard data: $DASHBOARD_DATA_DIR/dashboard.json"

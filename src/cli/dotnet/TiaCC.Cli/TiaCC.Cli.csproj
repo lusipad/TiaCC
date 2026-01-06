@@ -27,11 +27,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\TiaCC.Core\TiaCC.Core.csproj" />
+    <ProjectReference Include="..\..\..\core\dotnet\TiaCC.Core\TiaCC.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

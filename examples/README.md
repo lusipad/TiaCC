@@ -7,7 +7,7 @@ This directory will contain example projects demonstrating how to use TiaCC in d
 For examples of TiaCC usage, please refer to:
 
 - **E2E Tests**: See the [tests/e2e](../tests/e2e) directory for end-to-end test examples
-- **tools-dotnet Tests**: See the [tools-dotnet/TiaCC.Core.Tests](../tools-dotnet/TiaCC.Core.Tests) directory for unit test examples
+- **.NET Unit Tests**: See the [src/core/dotnet/TiaCC.Core.Tests](../src/core/dotnet/TiaCC.Core.Tests) directory for unit test examples
 
 ## 📚 Additional Resources
 

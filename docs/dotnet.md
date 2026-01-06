@@ -10,15 +10,14 @@
 ## Build
 
 ```bash
-cd tools-dotnet
-dotnet build
+dotnet build src/TiaCC.DotNet.sln
 ```
 
 ## Install as Global Tool
 
 ```bash
-dotnet pack TiaCC.Cli/TiaCC.Cli.csproj
-dotnet tool install --global --add-source ./TiaCC.Cli/nupkg TiaCC.Cli
+dotnet pack src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj
+dotnet tool install --global --add-source ./src/cli/dotnet/TiaCC.Cli/nupkg TiaCC.Cli
 ```
 
 ## Commands
@@ -51,7 +50,7 @@ tia-mapper map --db impact_map.db --coverage coverage.info --test test_e2e
 ### Export for Dashboard
 
 ```bash
-tia-mapper export --db impact_map.db --output ./dashboard/data
+tia-mapper export --db impact_map.db --output src/dashboard/dotnet/TiaCC.Dashboard/wwwroot/data
 ```
 
 ### Query Affected Tests
@@ -69,24 +68,24 @@ tia-mapper stats --db impact_map.db
 ## Project Structure
 
 ```
-tools-dotnet/
-├── TiaCC.sln              # Solution file
-├── global.json            # .NET SDK version
-├── TiaCC.Core/            # Core library
+src/
+├── TiaCC.DotNet.sln           # .NET Solution file
+├── core/dotnet/TiaCC.Core/    # Core library
 │   ├── Data/              # EF Core DbContext
 │   ├── Models/            # Entity models
 │   └── Services/          # Business logic
-├── TiaCC.Core.Tests/      # Unit tests
+├── core/dotnet/TiaCC.Core.Tests/      # Unit tests
 │   ├── CoverageParserTests.cs
 │   └── DatabaseServiceTests.cs
-├── TiaCC.Cli/             # CLI application
+├── cli/dotnet/TiaCC.Cli/             # CLI application
 │   └── Program.cs         # Command definitions
-├── TiaCC.Dashboard/       # Blazor WebAssembly dashboard
+├── dashboard/dotnet/TiaCC.Dashboard/       # Blazor WebAssembly dashboard
 │   ├── Pages/             # Razor pages
 │   ├── Components/        # Reusable components
 │   ├── Services/          # Data services
 │   └── wwwroot/           # Static assets
-└── scripts/               # Automation scripts
+scripts/
+└── dotnet/                # Automation scripts
     ├── build-self-test-map.sh   # Dogfooding script
     └── run-affected-tests.sh    # Smart test selection
 ```
@@ -96,13 +95,13 @@ tools-dotnet/
 Run all tests:
 
 ```bash
-dotnet test
+dotnet test src/TiaCC.DotNet.sln
 ```
 
 Run with coverage:
 
 ```bash
-dotnet test --collect:"XPlat Code Coverage"
+dotnet test src/TiaCC.DotNet.sln --collect:"XPlat Code Coverage"
 ```
 
 CI checks `TiaCC.Core` line coverage (target **90%**, Cobertura `line-rate`) and reports warnings without blocking the build.
@@ -113,15 +112,15 @@ TiaCC uses itself to optimize its own CI pipeline:
 
 ```bash
 # Build test impact map from own test suite
-./scripts/build-self-test-map.sh
+./scripts/dotnet/build-self-test-map.sh
 
 # Run only tests affected by recent changes
-./scripts/run-affected-tests.sh
+./scripts/dotnet/run-affected-tests.sh
 ```
 
 This generates:
-- `tiacc-data/impact_map.db` - Test impact database
-- `tiacc-data/coverage/` - Per-test coverage files
+- `artifacts/tiacc-data/impact_map.db` - Test impact database
+- `artifacts/tiacc-data/coverage/` - Per-test coverage files
 
 ## Dashboard
 
@@ -137,8 +136,7 @@ The dashboard is a Blazor WebAssembly application that provides interactive cove
 ### Run Dashboard
 
 ```bash
-cd TiaCC.Dashboard
-dotnet run
+dotnet run --project src/dashboard/dotnet/TiaCC.Dashboard/TiaCC.Dashboard.csproj
 ```
 
 Then open http://localhost:5000 in your browser.

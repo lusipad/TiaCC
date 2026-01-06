@@ -81,7 +81,7 @@ endif()
 # ------------------------------------------------------------------------------
 # Subdirectories
 # ------------------------------------------------------------------------------
-add_subdirectory(src/cpp)
+add_subdirectory(src/core/cpp)
 
 # ------------------------------------------------------------------------------
 # Testing (optional)
@@ -103,6 +103,6 @@ install(TARGETS tia_coverage tia_ipc_server
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-install(DIRECTORY src/cpp/include/
+install(DIRECTORY src/core/cpp/include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )

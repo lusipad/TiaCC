@@ -103,24 +103,12 @@ echo.
 
 cd /d "%~dp0"
 
-echo Starting local server at http://localhost:8080
+echo Starting Dashboard...
 echo.
-echo   Dashboard:    http://localhost:8080/dashboard/
+echo   Dashboard:    http://localhost:5000/
 echo   Test Reports: %REPORT_DIR%
 echo.
-echo Press Ctrl+C to stop the server.
+echo Press Ctrl+C to stop.
 echo.
 
-REM Try to use Python to start server
-where python >nul 2>&1
-if %ERRORLEVEL% equ 0 (
-    python -m http.server 8080
-) else (
-    where npx >nul 2>&1
-    if %ERRORLEVEL% equ 0 (
-        npx serve -l 8080 -s .
-    ) else (
-        echo No HTTP server available.
-        echo Please install Python or run: npm install -g serve
-    )
-)
+dotnet run --project src\dashboard\dotnet\TiaCC.Dashboard\TiaCC.Dashboard.csproj -c Release

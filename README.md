@@ -105,12 +105,8 @@ TiaCC 提供美观的 Web Dashboard，让你**可视化**理解代码与测试�
 git clone https://github.com/YourUsername/TiaCC.git  # 替换为实际仓库地址
 cd TiaCC
 
-# 2. 启动 Dashboard（使用示例数据）
-cd dashboard
-python -m http.server 8080
-
-# 3. 打开浏览器访问
-# http://localhost:8080/
+# 2. 启动 Dashboard（Blazor）
+dotnet run --project src/dashboard/dotnet/TiaCC.Dashboard/TiaCC.Dashboard.csproj -c Release
 ```
 
 ### 在你的项目中使用
@@ -118,12 +114,11 @@ python -m http.server 8080
 #### 第一步：安装 TiaCC CLI
 
 ```bash
-# 确保已安装 .NET 8.0+
+# 确保已安装 .NET 10 SDK (Preview)
 dotnet --version
 
 # 构建 TiaCC CLI
-cd tools-dotnet
-dotnet build -c Release
+dotnet build src/TiaCC.DotNet.sln -c Release
 ```
 
 #### 第二步：Nightly 构建映射数据库
@@ -133,10 +128,10 @@ dotnet build -c Release
 dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage
 
 # 2. 初始化数据库
-dotnet run --project TiaCC.Cli -- init --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
 
 # 3. 映射覆盖率数据
-dotnet run --project TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage ./coverage/*/coverage.cobertura.xml \
   --test MyTestClass
@@ -146,7 +141,7 @@ dotnet run --project TiaCC.Cli -- map \
 
 ```bash
 # 查询受影响的测试
-dotnet run --project TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/MyService.cs
 
@@ -175,7 +170,7 @@ git diff --name-only
 # → src/MathService.cs
 
 # 查询受影响的测试
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/MathService.cs
 # → MathServiceTests
@@ -190,7 +185,7 @@ dotnet test --filter "FullyQualifiedName~MathServiceTests"
 # .github/workflows/pr.yml
 - name: 获取受影响的测试
   run: |
-    dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+    dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
       --db impact_map.db \
       --files $(git diff --name-only origin/main) \
       > affected_tests.txt
@@ -221,12 +216,15 @@ dotnet test --filter "FullyQualifiedName~MathServiceTests"
 
 ```
 TiaCC/
-├── dashboard/           # Web 可视化 Dashboard
-├── tools-dotnet/        # .NET CLI 工具 (mapper, recommend)
-├── clients/             # 多语言测试框架客户端
+├── global.json          # .NET SDK 版本
+├── scripts/             # 仓库脚本（含 dotnet 自测脚本）
 ├── src/
-│   ├── cpp/             # C++ 覆盖率采集
-│   └── dotnet/          # C# 覆盖率采集
+│   ├── cli/dotnet/      # .NET CLI (tia-mapper)
+│   ├── core/cpp/        # C++ 核心/覆盖率采集
+│   ├── core/dotnet/     # .NET 核心库
+│   ├── dashboard/dotnet/# Blazor Dashboard
+│   ├── collectors/      # 覆盖率采集器（如 coverlet）
+│   └── clients/         # 多语言测试框架客户端
 ├── tests/e2e/           # 端到端验证测试
 └── docs/                # 详细文档
 ```

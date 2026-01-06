@@ -28,7 +28,7 @@
 
 ### 前置条件
 
-- .NET SDK 8.0+
+- .NET SDK 10.0 (Preview)
 - Clang 14+ (C++ 覆盖率)
 - CMake 3.20+
 
@@ -39,12 +39,11 @@
 git clone https://github.com/your-org/TiaCC.git
 cd TiaCC
 
-# 构建 tools-dotnet
-cd tools-dotnet
-dotnet build
+# 构建 .NET
+dotnet build src/TiaCC.DotNet.sln
 
 # 运行测试
-dotnet test
+dotnet test src/TiaCC.DotNet.sln
 ```
 
 ### 运行端到端测试
@@ -64,8 +63,7 @@ run_e2e_test.cmd
 - 所有公共 API 需要 XML 注释
 
 ```bash
-cd tools-dotnet
-dotnet format
+dotnet format src/TiaCC.DotNet.sln
 ```
 
 ### C++
@@ -109,21 +107,24 @@ Closes #123
 ```
 TiaCC/
 ├── src/                      # 源代码
-│   ├── cpp/                  # C++ 覆盖率模块
-│   └── dotnet/               # .NET 覆盖率模块
-├── tools-dotnet/             # CLI 工具 (.NET)
-├── clients/                  # 测试框架客户端
+│   ├── core/cpp/             # C++ 核心/覆盖率模块
+│   ├── core/dotnet/          # .NET 核心库
+│   ├── cli/dotnet/           # .NET CLI
+│   ├── dashboard/dotnet/     # Blazor Dashboard
+│   ├── collectors/           # 覆盖率采集器
+│   └── clients/              # 测试框架客户端
+├── scripts/                  # 仓库脚本
 ├── tests/
 │   └── e2e/                  # 端到端测试
 ├── docs/                     # 文档
-└── dashboard/                # Web 可视化 Dashboard
+└── global.json               # .NET SDK 版本
 ```
 
 ## 添加新功能
 
 ### 添加新的覆盖率格式
 
-1. 在 `tools-dotnet/TiaCC.Core/Services/CoverageParser.cs` 中创建新的解析器方法
+1. 在 `src/core/dotnet/TiaCC.Core/Services/CoverageParser.cs` 中创建新的解析器方法
 2. 实现解析逻辑
 3. 在 CLI 中注册新格式
 4. 添加单元测试
@@ -140,7 +141,7 @@ public class NewFormatParser
 
 ### 添加新的测试框架客户端
 
-1. 在 `clients/` 目录创建新语言的客户端
+1. 在 `src/clients/` 目录创建新语言的客户端
 2. 实现覆盖率收集接口
 3. 提供 `beforeTest/afterTest` 钩子
 4. 添加使用文档

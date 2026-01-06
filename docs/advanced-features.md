@@ -28,7 +28,7 @@
 CHANGED=$(git diff --name-only origin/main)
 
 # 查询受影响的测试
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files $CHANGED
 
@@ -43,15 +43,15 @@ dotnet run --project tools-dotnet/TiaCC.Cli -- query \
 
 ```bash
 # 显示详细统计信息
-dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 
 # 查询特定文件影响的测试
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/Calculator.cs src/Utils.cs
 
 # 输出到文件供 CI 使用
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files $CHANGED > affected_tests.txt
 ```
@@ -134,7 +134,7 @@ mappingService.RecordTestResult(
 
 ```bash
 # 注意：此功能尚未实现，计划在未来版本中提供
-# dotnet run --project tools-dotnet/TiaCC.Cli -- record-test \
+# dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- record-test \
 #   --db impact_map.db \
 #   --test tests/TestCalculator.cs \
 #   --status pass \
@@ -146,11 +146,11 @@ mappingService.RecordTestResult(
 
 ```bash
 # 查看数据库统计信息
-dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 
 # 查询受影响的测试
 CHANGED=$(git diff --name-only origin/main)
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files $CHANGED
 ```
@@ -167,7 +167,7 @@ Flaky 测试是指在相同代码下，有时通过、有时失败的不稳定�
 
 ```bash
 # 查看数据库统计
-dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 
 # 输出示例:
 # 📊 Database Statistics:
@@ -188,12 +188,12 @@ dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 
 ```bash
 # 查询文件覆盖的测试
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/Database.cs
 
 # 查看完整统计
-dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 ```
 
 ---
@@ -209,7 +209,7 @@ dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
 ```bash
 # 查询受影响的测试
 CHANGED=$(git diff --name-only origin/main)
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files $CHANGED
 
@@ -226,7 +226,7 @@ dotnet run --project tools-dotnet/TiaCC.Cli -- query \
 ```bash
 # 获取受影响的测试
 CHANGED=$(git diff --name-only origin/main)
-AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files $CHANGED)
 
@@ -244,7 +244,7 @@ fi
 ```bash
 # 获取受影响的测试
 CHANGED=$(git diff --name-only origin/main)
-AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files $CHANGED)
 
@@ -279,10 +279,10 @@ fi
 
 ```bash
 # 初始化数据库
-dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
 
 # 映射覆盖率数据（自动检测格式）
-dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage ./coverage/*.cobertura.xml \
   --test AllTests
@@ -298,7 +298,7 @@ dotnet run --project tools-dotnet/TiaCC.Cli -- map \
 
 ```bash
 # 从文件名解析
-dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage ./coverage/TestCalculator.cobertura.xml \
   --test TestCalculator
@@ -306,7 +306,7 @@ dotnet run --project tools-dotnet/TiaCC.Cli -- map \
 # 批量映射多个测试
 for coverage_file in ./coverage/**/coverage.cobertura.xml; do
   TEST_NAME=$(basename $(dirname "$coverage_file"))
-  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+  dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
     --db impact_map.db \
     --coverage "$coverage_file" \
     --test "$TEST_NAME"
@@ -324,7 +324,7 @@ done
 for coverage_file in ./coverage/**/coverage.cobertura.xml; do
   TEST_NAME=$(basename $(dirname "$coverage_file"))
   echo "Mapping coverage for $TEST_NAME..."
-  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+  dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
     --db impact_map.db \
     --coverage "$coverage_file" \
     --test "$TEST_NAME" || true
@@ -342,11 +342,11 @@ done
 ```bash
 # 清理旧数据后重新构建
 rm -rf coverage_data/*.profraw
-dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
 
 # 重新映射
 for coverage_file in ./coverage/*.cobertura.xml; do
-  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+  dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
     --db impact_map.db \
     --coverage "$coverage_file" \
     --test AllTests
@@ -383,15 +383,15 @@ jobs:
             --results-directory ./coverage
 
       - name: Build TiaCC
-        run: dotnet build tools-dotnet -c Release
+        run: dotnet build src/TiaCC.DotNet.sln -c Release
 
       - name: Build impact map
         run: |
-          dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
 
           for coverage_file in ./coverage/**/coverage.cobertura.xml; do
             TEST_NAME=$(basename $(dirname "$coverage_file"))
-            dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+            dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
               --db impact_map.db \
               --coverage "$coverage_file" \
               --test "$TEST_NAME" || true
@@ -432,14 +432,14 @@ jobs:
         continue-on-error: true
 
       - name: Build TiaCC
-        run: dotnet build tools-dotnet -c Release
+        run: dotnet build src/TiaCC.DotNet.sln -c Release
 
       - name: Get affected tests
         id: tiacc
         run: |
           if [ -f impact_map.db ]; then
             CHANGED=$(git diff --name-only origin/main)
-            AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+            AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
               --db impact_map.db \
               --files $CHANGED 2>/dev/null || echo "")
             echo "affected=$AFFECTED" >> $GITHUB_OUTPUT
@@ -482,11 +482,11 @@ jobs:
           name: impact-map
 
       - name: Build TiaCC
-        run: dotnet build tools-dotnet -c Release
+        run: dotnet build src/TiaCC.DotNet.sln -c Release
 
       - name: Generate stats report
         run: |
-          dotnet run --project tools-dotnet/TiaCC.Cli -- stats \
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats \
             --db impact_map.db > stats_report.txt
 
       - name: Create issue for stats
@@ -514,11 +514,11 @@ jobs:
 **解决方案**:
 ```bash
 # 检查数据库统计
-dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 
 # 如果 source_files 表为空，需要先映射覆盖率数据
-dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
-dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage ./coverage/*.cobertura.xml \
   --test AllTests
@@ -537,7 +537,7 @@ ls -la ./coverage/*.cobertura.xml
 head -50 ./coverage/coverage.cobertura.xml
 
 # 确保路径正确
-dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage "./coverage/coverage.cobertura.xml" \
   --test "AllTests"

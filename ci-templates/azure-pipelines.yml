@@ -29,7 +29,7 @@ parameters:
     default: false
   - name: dotnetVersion
     type: string
-    default: '8.0.x'
+    default: '10.0.x'
 
 stages:
   - stage: TiaCC
@@ -50,6 +50,7 @@ stages:
             displayName: 'Install .NET SDK'
             inputs:
               version: '${{ parameters.dotnetVersion }}'
+              includePreviewVersions: true
 
           - task: Cache@2
             displayName: 'Cache TiaCC Database'
@@ -59,18 +60,18 @@ stages:
               restoreKeys: |
                 tiacc | $(Agent.OS)
 
-          - script: dotnet build tools-dotnet -c Release
+          - script: dotnet build src/TiaCC.DotNet.sln -c Release
             displayName: 'Build TiaCC'
 
           - script: |
-              dotnet run --project tools-dotnet/TiaCC.Cli -- init --db ${{ parameters.database }}
+              dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db ${{ parameters.database }}
 
               # Map coverage files
               for coverage_file in ${{ parameters.coverageDir }}/**/coverage.cobertura.xml; do
                 if [ -f "$coverage_file" ]; then
                   TEST_NAME=$(basename $(dirname "$coverage_file"))
                   echo "Mapping coverage for $TEST_NAME..."
-                  dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+                  dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
                     --db ${{ parameters.database }} \
                     --coverage "$coverage_file" \
                     --test "$TEST_NAME" || true
@@ -78,7 +79,7 @@ stages:
               done
 
               # Show statistics
-              dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db ${{ parameters.database }}
+              dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db ${{ parameters.database }}
             displayName: 'Build TiaCC Mapping'
 
           - publish: '${{ parameters.database }}'
@@ -96,6 +97,7 @@ stages:
             displayName: 'Install .NET SDK'
             inputs:
               version: '${{ parameters.dotnetVersion }}'
+              includePreviewVersions: true
 
           - task: DownloadPipelineArtifact@2
             displayName: 'Download TiaCC Database'
@@ -114,7 +116,7 @@ stages:
               fi
             displayName: 'Restore Database'
 
-          - script: dotnet build tools-dotnet -c Release
+          - script: dotnet build src/TiaCC.DotNet.sln -c Release
             displayName: 'Build TiaCC'
 
           - script: |
@@ -128,7 +130,7 @@ stages:
               CHANGED_FILES=$(git diff --name-only origin/$(System.PullRequest.TargetBranch))
 
               # Query affected tests
-              dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+              dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
                 --db ${{ parameters.database }} \
                 --files $CHANGED_FILES > affected-tests.txt || true
 

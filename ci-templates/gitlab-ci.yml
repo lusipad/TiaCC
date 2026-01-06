@@ -19,7 +19,7 @@ variables:
   TIACC_COVERAGE_DIR: "./coverage"
   TIACC_BASE_BRANCH: "origin/main"
   TIACC_VERBOSE: "false"
-  DOTNET_VERSION: "8.0"
+  DOTNET_VERSION: "10.0"
 
 # Cache the database between runs
 .tiacc-cache:
@@ -35,16 +35,16 @@ variables:
   image: mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}
   stage: .pre
   script:
-    - dotnet build tools-dotnet -c Release
+    - dotnet build src/TiaCC.DotNet.sln -c Release
     - |
-      dotnet run --project tools-dotnet/TiaCC.Cli -- init --db $TIACC_DATABASE
+      dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db $TIACC_DATABASE  
 
       # Map coverage files
       for coverage_file in $TIACC_COVERAGE_DIR/**/coverage.cobertura.xml; do
         if [ -f "$coverage_file" ]; then
           TEST_NAME=$(basename $(dirname "$coverage_file"))
           echo "Mapping coverage for $TEST_NAME..."
-          dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
             --db $TIACC_DATABASE \
             --coverage "$coverage_file" \
             --test "$TEST_NAME" || true
@@ -52,7 +52,7 @@ variables:
       done
 
       # Show statistics
-      dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db $TIACC_DATABASE
+      dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db $TIACC_DATABASE
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -76,7 +76,7 @@ variables:
       fi
 
       # Build TiaCC
-      dotnet build tools-dotnet -c Release
+      dotnet build src/TiaCC.DotNet.sln -c Release
 
       # Get changed files
       if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
@@ -86,7 +86,7 @@ variables:
       fi
 
       # Query affected tests
-      dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+      dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
         --db $TIACC_DATABASE \
         --files $CHANGED_FILES > affected-tests.txt || true
 

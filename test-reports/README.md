@@ -158,7 +158,7 @@ find test-reports -type f ! -name 'README.md' -delete
 
 - [Architecture Documentation](../docs/architecture.md)
 - [CI/CD Integration Guide](../docs/ci-cd-integration.md)
-- [Dashboard Visualization](../dashboard/)
+- [Dashboard](../docs/dashboard.md)
 
 ## 💡 Tips
 

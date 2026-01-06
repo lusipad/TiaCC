@@ -247,12 +247,12 @@ jobs:
 
       - name: Build TiaCC CLI
         run: |
-          cd TiaCC/tools-dotnet
+          cd TiaCC
           dotnet build -c Release
 
       - name: Build impact map
         run: |
-          cd TiaCC/tools-dotnet
+          cd TiaCC
           dotnet run --project TiaCC.Cli -- init --db ../impact_map.db
           dotnet run --project TiaCC.Cli -- map \
             --db ../impact_map.db \
@@ -298,14 +298,14 @@ jobs:
 
       - name: Build TiaCC CLI
         run: |
-          cd TiaCC/tools-dotnet
+          cd TiaCC
           dotnet build -c Release
 
       - name: Get affected tests
         id: affected
         run: |
           CHANGED=$(git diff --name-only origin/main)
-          cd TiaCC/tools-dotnet
+          cd TiaCC
           dotnet run --project TiaCC.Cli -- query \
             --db ../../impact_map.db \
             --files $CHANGED \
@@ -335,11 +335,11 @@ jobs:
 
 ```bash
 # 构建 TiaCC CLI
-cd TiaCC/tools-dotnet
+cd TiaCC
 dotnet build -c Release
 
 # 添加别名方便使用
-alias tiacc="dotnet run --project /path/to/TiaCC/tools-dotnet/TiaCC.Cli --"
+alias tiacc="dotnet run --project /path/to/TiaCC/src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj --"
 ```
 
 ### 日常使用
@@ -377,7 +377,7 @@ tiacc stats --db impact_map.db
 
 - [ ] **工具安装**
   - [ ] 安装 .NET 8.0+
-  - [ ] 构建 TiaCC tools-dotnet
+  - [ ] 构建 TiaCC (.NET): `dotnet build src/TiaCC.DotNet.sln -c Release`
 
 - [ ] **CI/CD**
   - [ ] Nightly: 运行全量测试生成映射
@@ -436,5 +436,5 @@ tiacc map --db impact_map.db --coverage ./coverage/*.xml --test AllTests
 
 - 📖 **CI/CD 平台集成**：查看 [CI/CD Integration Guide](ci-cd-integration.md) 了解如何集成到 GitHub Actions、GitLab CI、Jenkins 等平台
 - 🎯 **高级功能**：查看 [Advanced Features](advanced-features.md) 了解智能推荐、失败预测等高级功能
-- 📊 **可视化分析**：使用 [Dashboard](../dashboard/README.md) 进行交互式代码覆盖率分析
+- 📊 **可视化分析**：使用 [Dashboard](dashboard.md) 进行交互式代码覆盖率分析
 - 🔧 **架构设计**：查看 [Architecture](architecture.md) 了解系统架构和扩展点

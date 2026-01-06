@@ -106,12 +106,8 @@ Click any source file to see function-level coverage details:
 git clone https://github.com/YourUsername/TiaCC.git  # Replace with your fork
 cd TiaCC
 
-# 2. Start Dashboard (with sample data)
-cd dashboard
-python -m http.server 8080
-
-# 3. Open browser
-# http://localhost:8080/
+# 2. Start Dashboard (Blazor)
+dotnet run --project src/dashboard/dotnet/TiaCC.Dashboard/TiaCC.Dashboard.csproj -c Release
 ```
 
 ### Using in Your Project
@@ -119,12 +115,11 @@ python -m http.server 8080
 #### Step 1: Install TiaCC CLI
 
 ```bash
-# Ensure .NET 8.0+ is installed
+# Ensure .NET 10 SDK (Preview) is installed
 dotnet --version
 
 # Build TiaCC CLI
-cd tools-dotnet
-dotnet build -c Release
+dotnet build src/TiaCC.DotNet.sln -c Release
 ```
 
 #### Step 2: Nightly - Build Mapping Database
@@ -134,10 +129,10 @@ dotnet build -c Release
 dotnet test --collect:"XPlat Code Coverage" --results-directory ./coverage
 
 # 2. Initialize database
-dotnet run --project TiaCC.Cli -- init --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
 
 # 3. Map coverage data
-dotnet run --project TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage ./coverage/*/coverage.cobertura.xml \
   --test MyTestClass
@@ -147,7 +142,7 @@ dotnet run --project TiaCC.Cli -- map \
 
 ```bash
 # Query affected tests
-dotnet run --project TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/MyService.cs
 
@@ -176,7 +171,7 @@ git diff --name-only
 # → src/MathService.cs
 
 # Query affected tests
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/MathService.cs
 # → MathServiceTests
@@ -191,7 +186,7 @@ dotnet test --filter "FullyQualifiedName~MathServiceTests"
 # .github/workflows/pr.yml
 - name: Get affected tests
   run: |
-    dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+    dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
       --db impact_map.db \
       --files $(git diff --name-only origin/main) \
       > affected_tests.txt
@@ -222,12 +217,15 @@ dotnet test --filter "FullyQualifiedName~MathServiceTests"
 
 ```
 TiaCC/
-├── dashboard/           # Web visualization Dashboard
-├── tools-dotnet/        # .NET CLI tools (mapper, recommend)
-├── clients/             # Multi-language test framework clients
+├── global.json          # .NET SDK version
+├── scripts/             # Repo scripts (incl. dotnet self-test)
 ├── src/
-│   ├── cpp/             # C++ coverage collection
-│   └── dotnet/          # C# coverage collection
+│   ├── cli/dotnet/      # .NET CLI (tia-mapper)
+│   ├── core/cpp/        # C++ core/coverage collection
+│   ├── core/dotnet/     # .NET core library
+│   ├── dashboard/dotnet/# Blazor Dashboard
+│   ├── collectors/      # Collectors (e.g., coverlet)
+│   └── clients/         # Multi-language test framework clients
 ├── tests/e2e/           # End-to-end verification tests
 └── docs/                # Detailed documentation
 ```

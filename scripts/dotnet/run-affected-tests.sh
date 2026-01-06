@@ -5,8 +5,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-DATA_DIR="$PROJECT_DIR/tiacc-data"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+CLI_PROJECT="$REPO_ROOT/src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj"
+TEST_PROJECT="$REPO_ROOT/src/core/dotnet/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
+
+DATA_DIR="$REPO_ROOT/artifacts/tiacc-data"
 DB_PATH="$DATA_DIR/impact_map.db"
 
 echo "=== TiaCC Smart Test Selection ==="
@@ -14,9 +17,9 @@ echo "=== TiaCC Smart Test Selection ==="
 # Check if database exists
 if [ ! -f "$DB_PATH" ]; then
     echo "Impact map not found at $DB_PATH"
-    echo "Run 'scripts/build-self-test-map.sh' first to build the map."
+    echo "Run 'scripts/dotnet/build-self-test-map.sh' first to build the map."
     echo "Falling back to running all tests..."
-    dotnet test "$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
+    dotnet test "$TEST_PROJECT"
     exit 0
 fi
 
@@ -34,7 +37,7 @@ fi
 if [ -z "$CHANGED_FILES" ]; then
     echo "No changed files detected."
     echo "Running all tests..."
-    dotnet test "$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
+    dotnet test "$TEST_PROJECT"
     exit 0
 fi
 
@@ -44,7 +47,7 @@ echo ""
 
 # Query affected tests
 echo "Querying impact map..."
-AFFECTED_TESTS=$(dotnet run --project "$PROJECT_DIR/TiaCC.Cli/TiaCC.Cli.csproj" -- query \
+AFFECTED_TESTS=$(dotnet run --project "$CLI_PROJECT" -- query \
     --db "$DB_PATH" \
     --files $CHANGED_FILES 2>/dev/null || echo "")
 
@@ -68,8 +71,8 @@ done
 
 if [ -n "$FILTER" ]; then
     echo "Running affected tests..."
-    dotnet test "$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj" --filter "$FILTER"
+    dotnet test "$TEST_PROJECT" --filter "$FILTER"
 else
     echo "No matching test filter. Running all tests..."
-    dotnet test "$PROJECT_DIR/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj"
+    dotnet test "$TEST_PROJECT"
 fi

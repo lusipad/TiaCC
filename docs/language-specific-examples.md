@@ -61,7 +61,7 @@ dotnet test \
 git clone https://github.com/your-org/TiaCC.git
 
 # 构建 TiaCC CLI
-cd TiaCC/tools-dotnet
+cd TiaCC
 dotnet build -c Release
 
 # 初始化数据库
@@ -148,7 +148,7 @@ coverage xml -o coverage/cobertura-coverage.xml
 
 ```bash
 # 构建 TiaCC CLI
-cd TiaCC/tools-dotnet
+cd TiaCC
 dotnet build -c Release
 
 # 初始化并映射
@@ -230,7 +230,7 @@ lcov_cobertura coverage.info -o coverage.cobertura.xml
 
 ```bash
 # 构建 TiaCC CLI
-cd TiaCC/tools-dotnet
+cd TiaCC
 dotnet build -c Release
 
 # 初始化并映射
@@ -290,7 +290,7 @@ cover2cover target/site/jacoco/jacoco.xml src/main/java > coverage.cobertura.xml
 #### 4️⃣ 构建映射数据库
 
 ```bash
-cd TiaCC/tools-dotnet
+cd TiaCC
 dotnet build -c Release
 
 dotnet run --project TiaCC.Cli -- init --db ../../impact_map.db
@@ -325,7 +325,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Build TiaCC
-        run: dotnet build tools-dotnet -c Release
+        run: dotnet build src/TiaCC.DotNet.sln -c Release
 
       # Nightly: 构建映射数据库
       - name: Run tests with coverage
@@ -337,11 +337,11 @@ jobs:
       - name: Build impact map
         if: github.ref == 'refs/heads/main'
         run: |
-          dotnet run --project tools-dotnet/TiaCC.Cli -- init --db impact_map.db
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
 
           for coverage_file in ./coverage/**/coverage.cobertura.xml; do
             TEST_NAME=$(basename $(dirname "$coverage_file"))
-            dotnet run --project tools-dotnet/TiaCC.Cli -- map \
+            dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
               --db impact_map.db \
               --coverage "$coverage_file" \
               --test "$TEST_NAME" || true
@@ -369,7 +369,7 @@ jobs:
         run: |
           if [ -f impact_map.db ]; then
             CHANGED=$(git diff --name-only origin/${{ github.base_ref }})
-            AFFECTED=$(dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+            AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
               --db impact_map.db \
               --files $CHANGED 2>/dev/null || echo "")
             echo "affected=$AFFECTED" >> $GITHUB_OUTPUT
@@ -428,19 +428,18 @@ PR #123: 修改了 src/Calculator.cs
 
 ```bash
 # 导出数据
-dotnet run --project tools-dotnet/TiaCC.Cli -- export \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- export \
   --db impact_map.db \
-  --output ./dashboard/data
+  --output src/dashboard/dotnet/TiaCC.Dashboard/wwwroot/data
 
 # 启动 dashboard
-cd TiaCC/dashboard
-python -m http.server 8080
+dotnet run --project src/dashboard/dotnet/TiaCC.Dashboard/TiaCC.Dashboard.csproj -c Release
 ```
 
 ### 查询特定文件的测试覆盖
 
 ```bash
-dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/Calculator.cs
 
@@ -453,7 +452,7 @@ dotnet run --project tools-dotnet/TiaCC.Cli -- query \
 ### 数据库统计
 
 ```bash
-dotnet run --project tools-dotnet/TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 
 # 输出:
 # 📊 Database Statistics:
@@ -493,7 +492,7 @@ A: 当然！在本地修改代码后，运行 query 命令查看需要运行哪�
 
 - [完整文档](https://github.com/your-org/TiaCC/tree/main/docs)
 - [CI 模板](https://github.com/your-org/TiaCC/tree/main/ci-templates)
-- [Dashboard 可视化](../dashboard/README.md)
+- [Dashboard 可视化](dashboard.md)
 
 ---
 

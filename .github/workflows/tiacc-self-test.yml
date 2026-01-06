@@ -4,11 +4,15 @@ on:
   push:
     branches: [ main, develop, "claude/*" ]
     paths:
-      - 'tools-dotnet/**'
+      - 'src/**'
+      - 'scripts/**'
+      - '.github/workflows/tiacc-self-test.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'tools-dotnet/**'
+      - 'src/**'
+      - 'scripts/**'
+      - '.github/workflows/tiacc-self-test.yml'
   workflow_dispatch:
 
 permissions:
@@ -20,33 +24,29 @@ jobs:
   dotnet-build-map:
     name: Build .NET Test Impact Map
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install .NET 10 (Daily)
-        run: |
-          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
-          chmod +x dotnet-install.sh
-          ./dotnet-install.sh --channel 10.0 --quality daily
-          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
-          echo "$HOME/.dotnet" >> $GITHUB_PATH
+      - name: Setup .NET (from global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          include-prerelease: true
 
       - name: Restore dependencies
-        working-directory: tools-dotnet
-        run: dotnet restore
+        run: dotnet restore src/TiaCC.DotNet.sln
 
       - name: Build impact map (dogfooding)
-        working-directory: tools-dotnet
-        run: bash scripts/build-self-test-map.sh
+        run: bash scripts/dotnet/build-self-test-map.sh
 
       - name: Upload .NET impact map as artifact
         uses: actions/upload-artifact@v4
         with:
           name: tiacc-dotnet-impact-map
-          path: tools-dotnet/tiacc-data/impact_map.db
+          path: artifacts/tiacc-data/impact_map.db
           retention-days: 30
 
   # Job 2: .NET PR 智能测试选择
@@ -61,30 +61,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install .NET 10 (Daily)
-        run: |
-          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
-          chmod +x dotnet-install.sh
-          ./dotnet-install.sh --channel 10.0 --quality daily
-          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
-          echo "$HOME/.dotnet" >> $GITHUB_PATH
+      - name: Setup .NET (from global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          include-prerelease: true
 
       - name: Restore and build
-        working-directory: tools-dotnet
         run: |
-          dotnet restore
-          dotnet build -c Release --no-restore
+          dotnet restore src/TiaCC.DotNet.sln
+          dotnet build src/TiaCC.DotNet.sln -c Release --no-restore
 
       - name: Detect changed files
         id: changed-files
-        working-directory: tools-dotnet
         run: |
           git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
           echo "Changed files in this PR:"
           cat changed_files.txt
 
-          # Filter for .cs files in tools-dotnet
-          grep '^tools-dotnet/.*\.cs$' changed_files.txt > changed_cs_files.txt || true
+          # Filter for .cs files in src/
+          grep '^src/.*\.cs$' changed_files.txt > changed_cs_files.txt || true
 
           if [ -s changed_cs_files.txt ]; then
             echo "Found changed .NET source files:"
@@ -103,22 +99,21 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: tiacc-self-test.yml
           name: tiacc-dotnet-impact-map
-          path: tools-dotnet/tiacc-data
+          path: artifacts/tiacc-data
           search_artifacts: true
 
       - name: Get affected tests
         id: affected-tests
         if: steps.changed-files.outputs.has_changes == 'true'
-        working-directory: tools-dotnet
         run: |
-          if [ -f "tiacc-data/impact_map.db" ]; then
+          if [ -f "artifacts/tiacc-data/impact_map.db" ]; then
             echo "Found .NET impact map, querying affected tests..."
 
-            # Get relative paths of changed files
-            CHANGED_FILES=$(cat changed_cs_files.txt | sed 's|^tools-dotnet/||' | tr '\n' ' ')
+            # Get relative paths of changed files (repo-root-relative)
+            CHANGED_FILES=$(cat changed_cs_files.txt | tr '\n' ' ')
 
-            AFFECTED=$(dotnet run --project TiaCC.Cli/TiaCC.Cli.csproj -- query \
-              --db tiacc-data/impact_map.db \
+            AFFECTED=$(dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
+              --db artifacts/tiacc-data/impact_map.db \
               --files $CHANGED_FILES 2>/dev/null || echo "")
 
             if [ -n "$AFFECTED" ] && [ "$AFFECTED" != "No affected tests found." ]; then
@@ -136,17 +131,16 @@ jobs:
           fi
 
       - name: Run .NET tests
-        working-directory: tools-dotnet
         run: |
           if [ "${{ steps.affected-tests.outputs.run_mode }}" == "smart" ]; then
             echo "Running ONLY affected .NET tests..."
             FILTER="${{ steps.affected-tests.outputs.test_filter }}"
             # Convert space-separated list to filter expression
             FILTER_EXPR=$(echo "$FILTER" | tr ' ' '\n' | sed 's/.*/FullyQualifiedName~&/' | tr '\n' '|' | sed 's/|$//')
-            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --no-build -c Release --filter "$FILTER_EXPR"
+            dotnet test src/core/dotnet/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --no-build -c Release --filter "$FILTER_EXPR"
           else
             echo "Running ALL .NET tests..."
-            dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --no-build -c Release
+            dotnet test src/core/dotnet/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj --no-build -c Release
           fi
 
   # Job 3: 代码覆盖率检查（不阻断）
@@ -158,33 +152,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install .NET 10 (Daily)
-        run: |
-          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
-          chmod +x dotnet-install.sh
-          ./dotnet-install.sh --channel 10.0 --quality daily
-          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
-          echo "$HOME/.dotnet" >> $GITHUB_PATH
+      - name: Setup .NET (from global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          include-prerelease: true
 
       - name: Restore and build
-        working-directory: tools-dotnet
         run: |
-          dotnet restore
-          dotnet build -c Release --no-restore
+          dotnet restore src/TiaCC.DotNet.sln
+          dotnet build src/TiaCC.DotNet.sln -c Release --no-restore
 
       - name: Run tests with coverage (Cobertura)
-        working-directory: tools-dotnet
         run: |
-          rm -rf tiacc-data/coverage-gate
-          mkdir -p tiacc-data/coverage-gate
-          
-          dotnet test TiaCC.Core.Tests/TiaCC.Core.Tests.csproj \
+          rm -rf artifacts/tiacc-data/coverage-gate
+          mkdir -p artifacts/tiacc-data/coverage-gate
+
+          dotnet test src/core/dotnet/TiaCC.Core.Tests/TiaCC.Core.Tests.csproj \
             --no-build -c Release \
             --collect:"XPlat Code Coverage" \
-            --results-directory tiacc-data/coverage-gate \
+            --results-directory artifacts/tiacc-data/coverage-gate \
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
-          
-          COVERAGE_FILE=$(find tiacc-data/coverage-gate -name "coverage.cobertura.xml" -type f | head -1)
+
+          COVERAGE_FILE=$(find artifacts/tiacc-data/coverage-gate -name "coverage.cobertura.xml" -type f | head -1)
           if [ -z "$COVERAGE_FILE" ]; then
             echo "Coverage file not found"
             exit 1
@@ -197,7 +187,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tiacc-dotnet-coverage
-          path: tools-dotnet/tiacc-data/coverage-gate/
+          path: artifacts/tiacc-data/coverage-gate/
           retention-days: 7
 
   # Job 4: 验证 .NET dogfooding 脚本
@@ -209,22 +199,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install .NET 10 (Daily)
-        run: |
-          wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
-          chmod +x dotnet-install.sh
-          ./dotnet-install.sh --channel 10.0 --quality daily
-          echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
-          echo "$HOME/.dotnet" >> $GITHUB_PATH
+      - name: Setup .NET (from global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          include-prerelease: true
 
       - name: Run .NET dogfooding script
-        working-directory: tools-dotnet
-        run: bash scripts/build-self-test-map.sh
+        run: bash scripts/dotnet/build-self-test-map.sh
 
       - name: Upload .NET demo artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tiacc-dotnet-dogfooding-demo
-          path: tools-dotnet/tiacc-data/
+          path: artifacts/tiacc-data/
           retention-days: 7

@@ -5,15 +5,15 @@
 ## 安装
 
 ```bash
-# 确保已安装 .NET 8.0+
+# 确保已安装 .NET 10 SDK (Preview)
 dotnet --version
 
 # 克隆仓库
 git clone https://github.com/your-org/TiaCC.git
-cd TiaCC/tools-dotnet
+cd TiaCC
 
 # 构建
-dotnet build -c Release
+dotnet build src/TiaCC.DotNet.sln -c Release
 ```
 
 ---
@@ -43,13 +43,11 @@ llvm-cov export ./myapp -instr-profile=coverage/merged.profdata > coverage/data.
 ### 第 2 步：构建映射数据库
 
 ```bash
-cd tools-dotnet
-
 # 初始化数据库
-dotnet run --project TiaCC.Cli -- init --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init --db impact_map.db
 
 # 映射覆盖率数据
-dotnet run --project TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db impact_map.db \
   --coverage ../coverage/*/coverage.cobertura.xml \
   --test MyTestClass
@@ -59,12 +57,12 @@ dotnet run --project TiaCC.Cli -- map \
 
 ```bash
 # 查询受影响的测试
-dotnet run --project TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db impact_map.db \
   --files src/MyService.cs
 
 # 查看统计信息
-dotnet run --project TiaCC.Cli -- stats --db impact_map.db
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats --db impact_map.db
 ```
 
 ---
@@ -89,7 +87,8 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          global-json-file: global.json
+          include-prerelease: true
 
       - name: Download impact map
         uses: dawidd6/action-download-artifact@v3
@@ -98,12 +97,12 @@ jobs:
           name: impact-map
 
       - name: Build TiaCC
-        run: dotnet build tools-dotnet -c Release
+        run: dotnet build src/TiaCC.DotNet.sln -c Release
 
       - name: Get affected tests
         run: |
           CHANGED_FILES=$(git diff --name-only origin/main)
-          dotnet run --project tools-dotnet/TiaCC.Cli -- query \
+          dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
             --db impact_map.db \
             --files $CHANGED_FILES \
             > affected_tests.txt
@@ -121,9 +120,9 @@ jobs:
 smart-test:
   stage: test
   script:
-    - dotnet build tools-dotnet -c Release
+    - dotnet build src/TiaCC.DotNet.sln -c Release
     - CHANGED_FILES=$(git diff --name-only origin/main)
-    - dotnet run --project tools-dotnet/TiaCC.Cli -- query --db impact_map.db --files $CHANGED_FILES > tests.txt
+    - dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query --db impact_map.db --files $CHANGED_FILES > tests.txt
     - FILTER=$(cat tests.txt | tr '\n' '|' | sed 's/|$//')
     - dotnet test --filter "FullyQualifiedName~$FILTER"
   only:
@@ -149,14 +148,14 @@ smart-test:
 #### init 命令
 
 ```bash
-dotnet run --project TiaCC.Cli -- init \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- init \
   --db <path>                   # 数据库路径（必需）
 ```
 
 #### map 命令
 
 ```bash
-dotnet run --project TiaCC.Cli -- map \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- map \
   --db <path>                   # 数据库路径（必需）
   --coverage <path>             # 覆盖率文件路径（必需）
   --test <name>                 # 测试名称（必需）
@@ -166,7 +165,7 @@ dotnet run --project TiaCC.Cli -- map \
 #### query 命令
 
 ```bash
-dotnet run --project TiaCC.Cli -- query \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- query \
   --db <path>                   # 数据库路径（必需）
   --files <files...>            # 要查询的文件列表（必需）
 ```
@@ -174,7 +173,7 @@ dotnet run --project TiaCC.Cli -- query \
 #### stats 命令
 
 ```bash
-dotnet run --project TiaCC.Cli -- stats \
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- stats \
   --db <path>                   # 数据库路径（必需）
 ```
 
@@ -184,7 +183,7 @@ dotnet run --project TiaCC.Cli -- stats \
 
 - [完整文档](docs/architecture.md)
 - [详细集成指南](docs/integration-guide.md)
-- [Dashboard 使用](dashboard/README.md)
+- [Dashboard 使用](docs/dashboard.md)
 - [E2E 测试示例](tests/e2e/README.md)
 
 ---
@@ -192,7 +191,7 @@ dotnet run --project TiaCC.Cli -- stats \
 ## 获取帮助
 
 ```bash
-dotnet run --project tools-dotnet/TiaCC.Cli -- --help
+dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- --help
 ```
 
 有问题？请提交 [Issue](https://github.com/your-org/TiaCC/issues)
