@@ -32,7 +32,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          include-prerelease: true
 
       - name: Determine version
         id: version
@@ -112,7 +111,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          include-prerelease: true
 
       - name: Publish self-contained executable
         run: |
@@ -159,7 +157,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          include-prerelease: true
 
       - name: Download NuGet packages
         uses: actions/download-artifact@v4

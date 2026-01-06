@@ -34,7 +34,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          include-prerelease: true
 
       - name: Restore dependencies
         run: dotnet restore src/TiaCC.DotNet.sln
@@ -65,7 +64,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          include-prerelease: true
 
       - name: Restore and build
         run: |
@@ -156,7 +154,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          include-prerelease: true
 
       - name: Restore and build
         run: |
@@ -203,7 +200,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          include-prerelease: true
 
       - name: Run .NET dogfooding script
         run: bash scripts/dotnet/build-self-test-map.sh
