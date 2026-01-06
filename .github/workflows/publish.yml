@@ -113,13 +113,14 @@ jobs:
           global-json-file: global.json
 
       - name: Publish self-contained executable
+        shell: bash
         run: |
           dotnet publish src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj \
             -c Release \
             -r ${{ matrix.runtime }} \
             --self-contained true \
             -p:PublishSingleFile=true \
-            -p:PublishTrimmed=true \
+            -p:PublishTrimmed=false \
             -p:Version=${{ needs.test-and-pack.outputs.version }} \
             -o ./artifacts/publish/${{ matrix.runtime }}
 
