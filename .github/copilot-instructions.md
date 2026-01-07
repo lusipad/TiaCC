@@ -1,6 +1,8 @@
 # Copilot Code Review Instructions
 
-- 当你进行代码审查（Copilot code review）时，请一律使用【简体中文】撰写评论。
-- 代码符号（类名/函数名/变量名/库名）、报错原文、路径、命令保持英文原样，不要翻译。
-- 输出结构：问题 -> 影响 -> 建议（必要时给最小示例）。
-- 尽量给可执行的修改建议，避免泛泛而谈。
+[English](copilot-instructions.md) | [简体中文](copilot-instructions.zh.md)
+
+- When performing code review (Copilot code review), always write comments in **Simplified Chinese**.
+- Keep code symbols (class/function/variable/library names), raw error messages, paths, and commands in English; do not translate them.
+- Use the structure: **Issue → Impact → Recommendation** (include a minimal example when needed).
+- Prefer actionable change suggestions; avoid vague feedback.

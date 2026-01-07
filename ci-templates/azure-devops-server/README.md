@@ -1,5 +1,7 @@
 # TiaCC Azure DevOps Server Integration
 
+[English](README.md) | [简体中文](README.zh.md)
+
 This directory contains templates and scripts for integrating TiaCC with Azure DevOps Server (formerly TFS).
 
 ## Files
@@ -13,8 +15,8 @@ This directory contains templates and scripts for integrating TiaCC with Azure D
 ## Prerequisites
 
 - Azure DevOps Server 2019 or later
-- Node.js 18+ installed on build agents
 - Git installed on build agents
+- `tia-mapper` available on build agents (recommended: download a self-contained release binary or install the .NET global tool `TiaCC.Cli`)
 
 ## Quick Start (YAML Pipeline)
 
@@ -47,7 +49,7 @@ extends:
 
 Add a **Command Line** task:
 ```bash
-npm install -g @tiacc/tools
+dotnet tool install --global TiaCC.Cli
 ```
 
 ### Step 2: Build Mapping (Main Branch)
@@ -67,13 +69,8 @@ Add a **PowerShell** task pointing to `tiacc-recommend.ps1`:
 ### Step 4: Run Tests
 
 Add a **PowerShell** or **Command Line** task:
-```powershell
-if ($env:TIACC_RUN_ALL -eq "true") {
-    npm test
-} else {
-    npm test -- --grep "$env:TIACC_AFFECTED_TESTS"
-}
-```
+
+Use your test framework’s filtering mechanism to run only the recommended tests (from `TIACC_AFFECTED_TESTS`).
 
 ## Variables
 
@@ -113,28 +110,17 @@ For faster builds, use the Cache@2 task:
 
 ## On-Premises Considerations
 
-### Private npm Registry
-
-If your organization uses a private npm registry:
-
-```yaml
-- script: |
-    npm config set registry https://your-registry.example.com/
-    npm install -g @tiacc/tools
-```
-
-### Self-Hosted Agents
+### Self-hosted agents
 
 Ensure your agents have:
-- Node.js 18+ (`node --version`)
+
 - Git with credential access (`git --version`)
-- Write permissions to the working directory
+- Permissions to write to the working directory
+- `tia-mapper` available (either from a mirrored release binary, or via `dotnet tool install`)
 
-### Network Restrictions
+### Network restrictions
 
-If agents have limited internet access:
-1. Publish `@tiacc/tools` to your internal registry
-2. Or include the tools in your repository
+If agents have limited internet access, mirror the release artifacts (or `.nupkg`) in your internal artifact store and fetch from there.
 
 ## Troubleshooting
 
@@ -153,13 +139,9 @@ If agents have limited internet access:
 ### Agent Issues
 
 ```powershell
-# Check Node.js version
-node --version
-
 # Check Git
 git --version
 
 # Check TiaCC installation
 tia-mapper --version
-tia-recommend --version
 ```

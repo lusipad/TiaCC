@@ -1,5 +1,7 @@
 # TiaCC CI/CD Integration Guide
 
+[English](ci-cd-integration.md) | [简体中文](ci-cd-integration.zh.md)
+
 > This guide focuses on integrating TiaCC into various CI/CD platforms.
 >
 > 📖 For general TiaCC integration (coverage collection, mapping setup), see: [Integration Guide](integration-guide.md)

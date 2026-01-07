@@ -1,10 +1,12 @@
 # TiaCC .NET Tools
 
+[English](dotnet.md) | [简体中文](dotnet.zh.md)
+
 .NET 10 implementation of TiaCC (Test Impact Analysis for C/C++) including CLI tool and web dashboard.
 
 ## Requirements
 
-- .NET 10 SDK (Preview)
+- .NET 10 SDK (see global.json)
 - SQLite (bundled via EF Core)
 
 ## Build

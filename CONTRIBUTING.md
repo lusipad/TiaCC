@@ -1,66 +1,62 @@
-# 贡献指南
+# Contributing
 
-感谢您对 TiaCC 项目的关注！我们欢迎任何形式的贡献。
+[English](CONTRIBUTING.md) | [简体中文](CONTRIBUTING.zh.md)
 
-## 如何贡献
+Thanks for your interest in TiaCC! We welcome contributions of all kinds.
 
-### 报告 Bug
+## How to contribute
 
-1. 确保 Bug 尚未被报告（搜索已有的 Issues）
-2. 创建新的 Issue，使用 Bug 报告模板
-3. 提供详细的复现步骤和环境信息
+### Report bugs
 
-### 提交功能请求
+1. Check existing issues to avoid duplicates
+2. Open a new issue using the bug template
+3. Provide clear reproduction steps and environment details
 
-1. 搜索是否已有类似的功能请求
-2. 创建新的 Issue，描述您期望的功能
-3. 说明使用场景和预期行为
+### Request features
 
-### 提交代码
+1. Search for similar feature requests
+2. Open a new issue describing the desired behavior
+3. Explain the use case and expected outcome
 
-1. Fork 仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
+### Submit code
 
-## 开发环境设置
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m "feat: ..."` )
+4. Push the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-### 前置条件
+## Development setup
 
-- .NET SDK 10.0（版本见 global.json）
-- Clang 14+ (C++ 覆盖率)
+### Prerequisites
+
+- .NET SDK 10 (see `global.json`)
+- Clang 14+ (for C++ coverage)
 - CMake 3.20+
 
-### 安装步骤
+### Build & test
 
 ```bash
-# 克隆仓库
 git clone https://github.com/lusipad/TiaCC.git
 cd TiaCC
 
-# 构建 .NET
 dotnet build src/TiaCC.DotNet.sln
-
-# 运行测试
 dotnet test src/TiaCC.DotNet.sln
 ```
 
-### 运行端到端测试
+### Run end-to-end tests
 
-```bash
+```powershell
 cd tests/e2e/cpp-project
-# Windows
-run_e2e_test.cmd
+./run_e2e_test.ps1
 ```
 
-## 代码规范
+## Coding style
 
 ### C#
 
-- 使用 EditorConfig
-- 遵循 .NET 编码规范
-- 所有公共 API 需要 XML 注释
+- Follow `.editorconfig` and .NET conventions
+- Document public APIs with XML docs where appropriate
 
 ```bash
 dotnet format src/TiaCC.DotNet.sln
@@ -68,12 +64,11 @@ dotnet format src/TiaCC.DotNet.sln
 
 ### C++
 
-- 使用 clang-format
-- 遵循项目 .clang-format 配置
+- Use `clang-format` following the repo’s `.clang-format`
 
-## 提交信息格式
+## Commit message format
 
-使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式：
+Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 <type>(<scope>): <description>
@@ -83,16 +78,18 @@ dotnet format src/TiaCC.DotNet.sln
 [optional footer]
 ```
 
-类型：
-- `feat`: 新功能
-- `fix`: Bug 修复
-- `docs`: 文档更新
-- `style`: 代码格式调整
-- `refactor`: 代码重构
-- `test`: 测试相关
-- `chore`: 构建/工具相关
+Common types:
 
-示例：
+- `feat`: features
+- `fix`: bug fixes
+- `docs`: documentation
+- `style`: formatting only
+- `refactor`: refactors
+- `test`: tests
+- `chore`: tooling/build
+
+Example:
+
 ```
 feat(mapper): add support for LLVM JSON format
 
@@ -102,63 +99,51 @@ exported via `llvm-cov export`.
 Closes #123
 ```
 
-## 项目结构
+## Project layout
 
 ```
 TiaCC/
-├── src/                      # 源代码
-│   ├── core/cpp/             # C++ 核心/覆盖率模块
-│   ├── core/dotnet/          # .NET 核心库
-│   ├── cli/dotnet/           # .NET CLI
+├── src/                      # source code
+│   ├── core/cpp/             # C++ core / coverage
+│   ├── core/dotnet/          # .NET core library
+│   ├── cli/dotnet/           # .NET CLI (global tool)
 │   ├── dashboard/dotnet/     # Blazor Dashboard
-│   ├── collectors/           # 覆盖率采集器
-│   └── clients/              # 测试框架客户端
-├── scripts/                  # 仓库脚本
+│   ├── collectors/           # coverage collectors
+│   └── clients/              # test framework clients
+├── scripts/                  # repo scripts
 ├── tests/
-│   └── e2e/                  # 端到端测试
-├── docs/                     # 文档
-└── global.json               # .NET SDK 版本
+│   └── e2e/                  # end-to-end tests
+├── docs/                     # docs
+└── global.json               # .NET SDK version
 ```
 
-## 添加新功能
+## Adding new features
 
-### 添加新的覆盖率格式
+### Add a new coverage format
 
-1. 在 `src/core/dotnet/TiaCC.Core/Services/CoverageParser.cs` 中创建新的解析器方法
-2. 实现解析逻辑
-3. 在 CLI 中注册新格式
-4. 添加单元测试
+1. Add a new parser under `src/core/dotnet/TiaCC.Core`
+2. Implement parsing logic
+3. Wire it into the CLI
+4. Add unit tests
 
-```csharp
-public class NewFormatParser
-{
-    public CoverageData Parse(string coverageFile)
-    {
-        // 实现解析逻辑
-    }
-}
-```
+### Add a new test framework client
 
-### 添加新的测试框架客户端
+1. Create a new client under `src/clients/`
+2. Implement coverage collection hooks
+3. Provide `beforeTest/afterTest` hooks
+4. Document usage
 
-1. 在 `src/clients/` 目录创建新语言的客户端
-2. 实现覆盖率收集接口
-3. 提供 `beforeTest/afterTest` 钩子
-4. 添加使用文档
+## Releases
 
-## 版本发布
+We follow [Semantic Versioning](https://semver.org/):
 
-遵循 [Semantic Versioning](https://semver.org/)：
+- **MAJOR**: breaking changes
+- **MINOR**: backward-compatible features
+- **PATCH**: backward-compatible fixes
 
-- **MAJOR**: 不兼容的 API 更改
-- **MINOR**: 向后兼容的功能添加
-- **PATCH**: 向后兼容的 Bug 修复
-
-## 联系方式
-
-如有问题，请通过以下方式联系：
+## Contact
 
 - Issues: GitHub Issues
-- 邮件: [maintainer@example.com]
+- Email: `maintainer@example.com`
 
-再次感谢您的贡献！
+Thanks again for contributing!

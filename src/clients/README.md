@@ -1,5 +1,7 @@
 # TiaCC Test Framework Hooks
 
+[English](README.md) | [简体中文](README.zh.md)
+
 This directory contains test framework hook implementations for multiple programming languages. These hooks enable TiaCC to collect coverage data during test execution.
 
 ## Overview

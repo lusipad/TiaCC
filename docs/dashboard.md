@@ -1,16 +1,23 @@
 # Dashboard (Blazor)
 
-TiaCC Dashboard 是一个 Blazor WebAssembly 应用，用于可视化测试影响关系与覆盖率数据。
+[English](dashboard.md) | [简体中文](dashboard.zh.md)
 
-## 启动
+TiaCC Dashboard is a Blazor WebAssembly app for visualizing test impact and coverage data.
+
+## Run
 
 ```bash
 dotnet run --project src/dashboard/dotnet/TiaCC.Dashboard/TiaCC.Dashboard.csproj -c Release
 ```
 
-## 导出数据
+## Export data
 
-Dashboard 默认从 `src/dashboard/dotnet/TiaCC.Dashboard/wwwroot/data/` 读取导出的 JSON 数据。
+The Dashboard loads JSON from `src/dashboard/dotnet/TiaCC.Dashboard/wwwroot/data/` (for example `data/dashboard.json`).
+
+`tia-mapper export` defaults to `./artifacts/tiacc-data/dashboard`. To view exported data in the Dashboard you can either:
+
+1. Export directly into the Dashboard web root via `--output`, or
+2. Export to the default folder and then copy the generated JSON into `wwwroot/data/`.
 
 ```bash
 dotnet run --project src/cli/dotnet/TiaCC.Cli/TiaCC.Cli.csproj -- export \

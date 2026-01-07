@@ -1,5 +1,7 @@
 # TiaCC.Coverlet.Collector
 
+[English](README.md) | [简体中文](README.zh.md)
+
 > Per-test coverage collection for .NET Test Impact Analysis
 
 ## Overview
